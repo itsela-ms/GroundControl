@@ -1,0 +1,185 @@
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const SessionService = require('./session-service');
+const PtyManager = require('./pty-manager');
+const TagIndexer = require('./tag-indexer');
+const ResourceIndexer = require('./resource-indexer');
+const SettingsService = require('./settings-service');
+
+let mainWindow;
+let sessionService;
+let ptyManager;
+let tagIndexer;
+let resourceIndexer;
+let settingsService;
+
+const COPILOT_PATH = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', 'copilot.exe');
+const SESSION_STATE_DIR = path.join(process.env.USERPROFILE, '.copilot', 'session-state');
+const COPILOT_CONFIG_DIR = path.join(process.env.USERPROFILE, '.copilot');
+const INSTRUCTIONS_PATH = path.join(COPILOT_CONFIG_DIR, 'copilot-instructions.md');
+
+function createWindow() {
+  const theme = settingsService.get().theme || 'mocha';
+  const bg = theme === 'latte' ? '#eff1f5' : '#1e1e2e';
+  const fg = theme === 'latte' ? '#4c4f69' : '#cdd6f4';
+
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 900,
+    minHeight: 600,
+    backgroundColor: bg,
+    frame: false,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: bg,
+      symbolColor: fg,
+      height: 36
+    },
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
+    }
+  });
+
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+}
+
+app.whenReady().then(async () => {
+  settingsService = new SettingsService(COPILOT_CONFIG_DIR);
+  await settingsService.load();
+
+  sessionService = new SessionService(SESSION_STATE_DIR);
+  ptyManager = new PtyManager(COPILOT_PATH, settingsService);
+
+  tagIndexer = new TagIndexer(SESSION_STATE_DIR);
+  await tagIndexer.init();
+
+  resourceIndexer = new ResourceIndexer(SESSION_STATE_DIR);
+  await resourceIndexer.init();
+
+  await sessionService.cleanEmptySessions();
+
+  createWindow();
+
+  // IPC: Get session list (with tags and resources)
+  ipcMain.handle('sessions:list', async () => {
+    const sessions = await sessionService.listSessions();
+    return sessions.map(s => ({
+      ...s,
+      tags: tagIndexer.getTagsForSession(s.id),
+      resources: resourceIndexer.getResourcesForSession(s.id)
+    }));
+  });
+
+  // IPC: Open/resume a session
+  ipcMain.handle('session:open', (event, sessionId) => {
+    return ptyManager.openSession(sessionId);
+  });
+
+  // IPC: Start a new session
+  ipcMain.handle('session:new', () => {
+    return ptyManager.newSession();
+  });
+
+  // IPC: Write to a session's pty
+  ipcMain.on('pty:write', (event, { sessionId, data }) => {
+    try { ptyManager.write(sessionId, data); } catch {}
+  });
+
+  // IPC: Resize a session's pty
+  ipcMain.on('pty:resize', (event, { sessionId, cols, rows }) => {
+    try { ptyManager.resize(sessionId, cols, rows); } catch {}
+  });
+
+  // IPC: Kill a session's pty
+  ipcMain.handle('pty:kill', (event, sessionId) => {
+    ptyManager.kill(sessionId);
+  });
+
+  // IPC: Get settings
+  ipcMain.handle('settings:get', () => {
+    return settingsService.get();
+  });
+
+  // IPC: Update settings
+  ipcMain.handle('settings:update', async (event, partial) => {
+    const updated = await settingsService.update(partial);
+    ptyManager.updateSettings(updated);
+
+    // Update window chrome for theme changes
+    if (partial.theme && mainWindow && !mainWindow.isDestroyed()) {
+      const bg = partial.theme === 'latte' ? '#eff1f5' : '#1e1e2e';
+      const fg = partial.theme === 'latte' ? '#4c4f69' : '#cdd6f4';
+      mainWindow.setTitleBarOverlay({ color: bg, symbolColor: fg });
+      mainWindow.setBackgroundColor(bg);
+    }
+
+    return updated;
+  });
+
+  // IPC: Get active sessions
+  ipcMain.handle('pty:active', () => {
+    return ptyManager.getActiveSessions();
+  });
+
+  // IPC: Read instructions file
+  ipcMain.handle('instructions:read', async () => {
+    try {
+      return await fs.promises.readFile(INSTRUCTIONS_PATH, 'utf8');
+    } catch {
+      return '';
+    }
+  });
+
+  // IPC: Write instructions file
+  ipcMain.handle('instructions:write', async (event, content) => {
+    await fs.promises.writeFile(INSTRUCTIONS_PATH, content, 'utf8');
+  });
+
+  // IPC: Open external URL
+  ipcMain.handle('shell:openExternal', (event, url) => {
+    if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
+      shell.openExternal(url);
+    }
+  });
+
+  // Forward pty output to renderer — batch at 16ms intervals to prevent IPC flooding
+  const ptyDataBuffers = new Map(); // sessionId -> string[]
+  let ptyFlushTimer = null;
+
+  function flushPtyData() {
+    ptyFlushTimer = null;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      ptyDataBuffers.clear();
+      return;
+    }
+    for (const [sessionId, chunks] of ptyDataBuffers) {
+      mainWindow.webContents.send('pty:data', { sessionId, data: chunks.join('') });
+    }
+    ptyDataBuffers.clear();
+  }
+
+  ptyManager.on('data', (sessionId, data) => {
+    if (!ptyDataBuffers.has(sessionId)) ptyDataBuffers.set(sessionId, []);
+    ptyDataBuffers.get(sessionId).push(data);
+    if (!ptyFlushTimer) {
+      ptyFlushTimer = setTimeout(flushPtyData, 16);
+    }
+  });
+
+  ptyManager.on('exit', (sessionId, exitCode) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('pty:exit', { sessionId, exitCode });
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  tagIndexer.stop();
+  resourceIndexer.stop();
+  ptyManager.killAll();
+  app.quit();
+});

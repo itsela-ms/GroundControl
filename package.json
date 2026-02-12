@@ -1,0 +1,22 @@
+{
+  "name": "copilot-session-gui",
+  "version": "1.0.0",
+  "description": "GUI for managing GitHub Copilot CLI sessions",
+  "main": "src/main.js",
+  "scripts": {
+    "build": "esbuild src/renderer.js --bundle --outfile=dist/renderer.js --platform=browser --format=iife",
+    "start": "npm run build && electron . --no-sandbox",
+    "launch": "npm run build && wscript launch.vbs"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
+    "js-yaml": "^4.1.0",
+    "node-pty": "^1.1.0"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "esbuild": "^0.27.3"
+  }
+}

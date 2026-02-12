@@ -1,0 +1,37 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  // Sessions
+  listSessions: () => ipcRenderer.invoke('sessions:list'),
+  openSession: (sessionId) => ipcRenderer.invoke('session:open', sessionId),
+  newSession: () => ipcRenderer.invoke('session:new'),
+  killSession: (sessionId) => ipcRenderer.invoke('pty:kill', sessionId),
+
+  // PTY I/O
+  writePty: (sessionId, data) => ipcRenderer.send('pty:write', { sessionId, data }),
+  resizePty: (sessionId, cols, rows) => ipcRenderer.send('pty:resize', { sessionId, cols, rows }),
+  onPtyData: (callback) => {
+    const listener = (event, payload) => callback(payload.sessionId, payload.data);
+    ipcRenderer.on('pty:data', listener);
+    return () => ipcRenderer.removeListener('pty:data', listener);
+  },
+  onPtyExit: (callback) => {
+    const listener = (event, payload) => callback(payload.sessionId, payload.exitCode);
+    ipcRenderer.on('pty:exit', listener);
+    return () => ipcRenderer.removeListener('pty:exit', listener);
+  },
+
+  // Active sessions
+  getActiveSessions: () => ipcRenderer.invoke('pty:active'),
+
+  // Settings
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  updateSettings: (settings) => ipcRenderer.invoke('settings:update', settings),
+
+  // Instructions
+  readInstructions: () => ipcRenderer.invoke('instructions:read'),
+  writeInstructions: (content) => ipcRenderer.invoke('instructions:write', content),
+
+  // Shell
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+});
