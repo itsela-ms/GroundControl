@@ -15,6 +15,7 @@ let tagIndexer;
 let resourceIndexer;
 let settingsService;
 let notificationService;
+let ptyFlushTimer = null;
 
 const COPILOT_PATH = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', 'copilot.exe');
 const SESSION_STATE_DIR = path.join(process.env.USERPROFILE, '.copilot', 'session-state');
@@ -218,7 +219,6 @@ app.whenReady().then(async () => {
 
   // Forward pty output to renderer — batch at 16ms intervals to prevent IPC flooding
   const ptyDataBuffers = new Map(); // sessionId -> string[]
-  let ptyFlushTimer = null;
 
   function flushPtyData() {
     ptyFlushTimer = null;

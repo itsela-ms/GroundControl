@@ -27,7 +27,7 @@
     "win": {
       "target": "portable",
       "icon": "agency.ico"
-    },
+    }
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
