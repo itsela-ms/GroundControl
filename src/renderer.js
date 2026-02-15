@@ -363,6 +363,17 @@ function createTerminal(sessionId) {
   terminal.onData((data) => window.api.writePty(sessionId, data));
   terminal.onResize(({ cols, rows }) => window.api.resizePty(sessionId, cols, rows));
 
+  // Intercept Ctrl+V to paste from clipboard into the terminal
+  terminal.attachCustomKeyEventHandler((e) => {
+    if (e.ctrlKey && e.key === 'v' && e.type === 'keydown') {
+      navigator.clipboard.readText().then(text => {
+        if (text) window.api.writePty(sessionId, text);
+      }).catch(() => {});
+      return false;
+    }
+    return true;
+  });
+
   terminals.set(sessionId, { terminal, fitAddon, wrapper });
 }
 
