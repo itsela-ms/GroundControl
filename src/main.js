@@ -17,11 +17,35 @@ let settingsService;
 let notificationService;
 let ptyFlushTimer = null;
 
-const COPILOT_PATH = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', 'copilot.exe');
+const COPILOT_PATH = resolveCopilotPath();
 const SESSION_STATE_DIR = path.join(process.env.USERPROFILE, '.copilot', 'session-state');
 const COPILOT_CONFIG_DIR = path.join(process.env.USERPROFILE, '.copilot');
 const NOTIFICATIONS_DIR = path.join(COPILOT_CONFIG_DIR, 'notifications');
 const INSTRUCTIONS_PATH = path.join(COPILOT_CONFIG_DIR, 'copilot-instructions.md');
+
+function resolveCopilotPath() {
+  const { execSync } = require('child_process');
+
+  // 1. Check PATH (works regardless of install method)
+  try {
+    const result = execSync('where copilot.exe', { encoding: 'utf8', timeout: 5000 }).trim();
+    const firstMatch = result.split(/\r?\n/)[0];
+    if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
+  } catch {}
+
+  // 2. Known install locations
+  const candidates = [
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Links', 'copilot.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'copilot-cli', 'copilot.exe'),
+    path.join(process.env.PROGRAMFILES || '', 'GitHub Copilot CLI', 'copilot.exe'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+
+  // 3. Fall back to bare command name — let the OS resolve it at spawn time
+  return 'copilot.exe';
+}
 
 function createWindow() {
   const theme = settingsService.get().theme || 'mocha';
@@ -59,8 +83,9 @@ app.whenReady().then(async () => {
   settingsService = new SettingsService(COPILOT_CONFIG_DIR);
   await settingsService.load();
 
+  const copilotExe = settingsService.get().copilotPath || COPILOT_PATH;
   sessionService = new SessionService(SESSION_STATE_DIR);
-  ptyManager = new PtyManager(COPILOT_PATH, settingsService);
+  ptyManager = new PtyManager(copilotExe, settingsService);
 
   tagIndexer = new TagIndexer(SESSION_STATE_DIR);
   await tagIndexer.init();

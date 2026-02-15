@@ -6,6 +6,7 @@ const DEFAULTS = {
   sidebarWidth: 280,
   lastActiveTab: 'active', // 'active' or 'history'
   theme: 'mocha', // 'mocha' or 'latte'
+  copilotPath: '', // auto-detect if empty; override with full path to copilot.exe
 };
 
 class SettingsService {
