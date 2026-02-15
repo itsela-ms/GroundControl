@@ -19,6 +19,7 @@
   --yellow: #f9e2af;
   --mauve: #cba6f7;
   --teal: #94e2d5;
+  --bg-hover: #313244;
   --border: #313244;
   --sidebar-width: 280px;
   --term-bg: #1e1e2e;
@@ -42,6 +43,7 @@
   --yellow: #df8e1d;
   --mauve: #8839ef;
   --teal: #179299;
+  --bg-hover: #dce0e8;
   --border: #ccd0da;
   --sidebar-width: 280px;
   --term-bg: #eff1f5;
@@ -87,7 +89,7 @@ body {
   gap: 6px;
 }
 
-#btn-instructions, #btn-settings {
+#btn-instructions, #btn-settings, #btn-notifications {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -98,7 +100,7 @@ body {
   transition: all 0.15s;
 }
 
-#btn-instructions:hover, #btn-settings:hover {
+#btn-instructions:hover, #btn-settings:hover, #btn-notifications:hover {
   color: var(--text);
   border-color: var(--accent);
 }
