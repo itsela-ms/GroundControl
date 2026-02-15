@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Notification, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const SessionService = require('./session-service');
@@ -7,8 +7,10 @@ const TagIndexer = require('./tag-indexer');
 const ResourceIndexer = require('./resource-indexer');
 const SettingsService = require('./settings-service');
 const NotificationService = require('./notification-service');
+const UpdateService = require('./update-service');
 
 let mainWindow;
+let updateService;
 let sessionService;
 let ptyManager;
 let tagIndexer;
@@ -126,7 +128,20 @@ app.whenReady().then(async () => {
 
   notificationService.start();
 
+  // Custom menu without 'paste' — xterm's custom key handler owns Ctrl+V.
+  // The default Electron menu fires webContents.paste() before keydown reaches
+  // the renderer, causing a double-paste.
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: 'Edit', submenu: [{ role: 'copy' }, { role: 'selectAll' }] },
+    { label: 'View', submenu: [{ role: 'toggleDevTools' }, { role: 'reload' }, { role: 'forceReload' }] },
+  ]));
+
   createWindow();
+
+  updateService = new UpdateService(mainWindow);
+  mainWindow.webContents.on('did-finish-load', () => {
+    updateService.checkOnStartup();
+  });
 
   // IPC: Open/resume a session
   ipcMain.handle('session:open', (event, sessionId) => {

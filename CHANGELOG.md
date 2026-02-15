@@ -2,6 +2,15 @@
 
 All notable changes to GroundControl are documented here.
 
+## [0.4.0] - 2025-02-15
+
+### Added
+- Auto-update via GitHub Releases (electron-updater)
+- "Check for Updates" button in Settings with download progress
+- "Restart & Update" one-click install for downloaded updates
+- About section in Settings showing version and changelog
+- Switched from portable `.exe` to NSIS installer (install/uninstall, Start Menu entry)
+
 ## [0.3.0] - 2025-02-15
 
 ### Added

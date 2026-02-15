@@ -145,6 +145,12 @@ async function init() {
   settingsOverlay.querySelector('.settings-close').addEventListener('click', closeSettings);
   settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) closeSettings(); });
 
+  // Update buttons
+  document.getElementById('btn-check-update').addEventListener('click', () => window.api.checkForUpdates());
+  document.getElementById('btn-download-update').addEventListener('click', () => window.api.downloadUpdate());
+  document.getElementById('btn-install-update').addEventListener('click', () => window.api.installUpdate());
+  window.api.onUpdateStatus(handleUpdateStatus);
+
   // Theme switcher
   settingsOverlay.querySelectorAll('.theme-option').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -213,6 +219,68 @@ function applyTheme(theme) {
 
 function openSettings() {
   settingsOverlay.classList.remove('hidden');
+  populateAboutSection();
+}
+
+async function populateAboutSection() {
+  const version = await window.api.getVersion();
+  const changelog = await window.api.getChangelog();
+  document.getElementById('about-version').textContent = `v${version}`;
+  const changelogEl = document.getElementById('about-changelog');
+  changelogEl.textContent = changelog || 'No changelog available.';
+
+  // Restore current update status
+  const updateData = await window.api.getUpdateStatus();
+  if (updateData) handleUpdateStatus(updateData);
+}
+
+function handleUpdateStatus(data) {
+  const statusEl = document.getElementById('update-status');
+  const progressEl = document.getElementById('update-progress');
+  const progressBar = document.getElementById('update-progress-bar');
+  const btnCheck = document.getElementById('btn-check-update');
+  const btnDownload = document.getElementById('btn-download-update');
+  const btnInstall = document.getElementById('btn-install-update');
+
+  statusEl.classList.remove('hidden');
+  progressEl.classList.add('hidden');
+  btnDownload.classList.add('hidden');
+  btnInstall.classList.add('hidden');
+  btnCheck.disabled = false;
+
+  switch (data.status) {
+    case 'checking':
+      statusEl.textContent = 'Checking for updates…';
+      btnCheck.disabled = true;
+      break;
+    case 'available':
+      statusEl.textContent = `Update available: v${data.info?.version}`;
+      statusEl.className = 'update-status update-available';
+      btnDownload.classList.remove('hidden');
+      break;
+    case 'not-available':
+      statusEl.textContent = 'You\'re on the latest version.';
+      statusEl.className = 'update-status';
+      break;
+    case 'downloading':
+      statusEl.textContent = `Downloading… ${Math.round(data.progress?.percent || 0)}%`;
+      progressEl.classList.remove('hidden');
+      progressBar.style.width = `${data.progress?.percent || 0}%`;
+      btnCheck.disabled = true;
+      break;
+    case 'downloaded':
+      statusEl.textContent = `v${data.info?.version} ready to install.`;
+      statusEl.className = 'update-status update-available';
+      btnInstall.classList.remove('hidden');
+      break;
+    case 'error':
+      statusEl.textContent = `Update error: ${data.error}`;
+      statusEl.className = 'update-status update-error';
+      break;
+    case 'idle':
+      statusEl.classList.add('hidden');
+      break;
+  }
 }
 
 function closeSettings() {
@@ -426,8 +494,9 @@ function createTerminal(sessionId) {
   terminal.onData((data) => window.api.writePty(sessionId, data));
   terminal.onResize(({ cols, rows }) => window.api.resizePty(sessionId, cols, rows));
 
-  // Suppress xterm's native paste handler — we handle paste in the custom key handler below.
-  // Without this, Ctrl+V fires both our handler AND xterm's paste listener, causing double paste.
+  // Defense-in-depth: suppress xterm's native paste handler.
+  // Primary fix is in main.js (custom menu without 'paste' role), but this
+  // catches any residual browser-level paste events that slip through.
   if (terminal.textarea) {
     terminal.textarea.addEventListener('paste', (e) => {
       e.preventDefault();
