@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Notification, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const SessionService = require('./session-service');
@@ -21,6 +21,11 @@ const SESSION_STATE_DIR = path.join(process.env.USERPROFILE, '.copilot', 'sessio
 const COPILOT_CONFIG_DIR = path.join(process.env.USERPROFILE, '.copilot');
 const NOTIFICATIONS_DIR = path.join(COPILOT_CONFIG_DIR, 'notifications');
 const INSTRUCTIONS_PATH = path.join(COPILOT_CONFIG_DIR, 'copilot-instructions.md');
+
+function getInstructionsPath() {
+  const custom = settingsService.get().instructionsPath;
+  return custom || INSTRUCTIONS_PATH;
+}
 
 function createWindow() {
   const theme = settingsService.get().theme || 'mocha';
@@ -150,7 +155,7 @@ app.whenReady().then(async () => {
   // IPC: Read instructions file
   ipcMain.handle('instructions:read', async () => {
     try {
-      return await fs.promises.readFile(INSTRUCTIONS_PATH, 'utf8');
+      return await fs.promises.readFile(getInstructionsPath(), 'utf8');
     } catch {
       return '';
     }
@@ -158,7 +163,36 @@ app.whenReady().then(async () => {
 
   // IPC: Write instructions file
   ipcMain.handle('instructions:write', async (event, content) => {
-    await fs.promises.writeFile(INSTRUCTIONS_PATH, content, 'utf8');
+    await fs.promises.writeFile(getInstructionsPath(), content, 'utf8');
+  });
+
+  // IPC: Check if instructions file exists
+  ipcMain.handle('instructions:exists', async () => {
+    try {
+      await fs.promises.access(getInstructionsPath());
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  // IPC: Get the resolved instructions path
+  ipcMain.handle('instructions:getPath', () => {
+    return getInstructionsPath();
+  });
+
+  // IPC: Pick an instructions file via native dialog
+  ipcMain.handle('instructions:pick', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Instructions File',
+      filters: [
+        { name: 'Markdown', extensions: ['md', 'markdown', 'txt'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0];
   });
 
   // IPC: Open external URL

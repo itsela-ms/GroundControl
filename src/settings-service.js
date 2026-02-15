@@ -6,6 +6,7 @@ const DEFAULTS = {
   sidebarWidth: 280,
   lastActiveTab: 'active', // 'active' or 'history'
   theme: 'mocha', // 'mocha' or 'latte'
+  instructionsPath: '', // empty = default (~/.copilot/copilot-instructions.md)
 };
 
 class SettingsService {

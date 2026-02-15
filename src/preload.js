@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('api', {
   // Instructions
   readInstructions: () => ipcRenderer.invoke('instructions:read'),
   writeInstructions: (content) => ipcRenderer.invoke('instructions:write', content),
+  instructionsExists: () => ipcRenderer.invoke('instructions:exists'),
+  getInstructionsPath: () => ipcRenderer.invoke('instructions:getPath'),
+  pickInstructionsFile: () => ipcRenderer.invoke('instructions:pick'),
 
   // Shell
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),

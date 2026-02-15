@@ -62,6 +62,7 @@ const NOTIF_ICONS = { 'task-done': '✅', 'needs-input': '⏳', 'error': '❌', 
 async function init() {
   const settings = await window.api.getSettings();
   maxConcurrentInput.value = settings.maxConcurrent;
+  document.getElementById('instructions-path').value = settings.instructionsPath || '';
   if (settings.sidebarWidth) {
     document.getElementById('sidebar').style.width = settings.sidebarWidth + 'px';
   }
@@ -567,6 +568,29 @@ function fitActiveTerminal() {
 
 // Instructions panel
 async function showInstructions() {
+  const exists = await window.api.instructionsExists();
+  if (!exists) {
+    const resolvedPath = await window.api.getInstructionsPath();
+    instructionsRendered.innerHTML = `
+      <div class="instructions-missing">
+        <p>No instructions file found at:</p>
+        <code>${escapeHtml(resolvedPath)}</code>
+        <p>Pick an existing file or create one at the default location.</p>
+        <button id="btn-pick-instructions" class="btn-secondary">Browse for file…</button>
+      </div>`;
+    document.getElementById('btn-pick-instructions').addEventListener('click', async () => {
+      const picked = await window.api.pickInstructionsFile();
+      if (picked) {
+        document.getElementById('instructions-path').value = picked;
+        await window.api.updateSettings({ instructionsPath: picked });
+        showInstructions();
+      }
+    });
+    instructionsPanel.classList.remove('hidden');
+    terminalArea.style.display = 'none';
+    return;
+  }
+
   const content = await window.api.readInstructions();
   originalInstructions = content;
   currentInstructions = content;
@@ -894,6 +918,19 @@ btnNewCenter.addEventListener('click', newSession);
 maxConcurrentInput.addEventListener('change', (e) => {
   const val = parseInt(e.target.value, 10);
   if (val >= 1 && val <= 20) window.api.updateSettings({ maxConcurrent: val });
+});
+
+// Instructions path setting
+const instructionsPathInput = document.getElementById('instructions-path');
+instructionsPathInput.addEventListener('change', (e) => {
+  window.api.updateSettings({ instructionsPath: e.target.value.trim() });
+});
+document.getElementById('btn-browse-instructions').addEventListener('click', async () => {
+  const picked = await window.api.pickInstructionsFile();
+  if (picked) {
+    instructionsPathInput.value = picked;
+    window.api.updateSettings({ instructionsPath: picked });
+  }
 });
 
 // Notification functions
