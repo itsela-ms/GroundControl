@@ -392,7 +392,8 @@ function createTerminal(sessionId) {
     cursorBlink: true,
     cursorStyle: 'bar',
     scrollback: 10000,
-    allowProposedApi: true
+    allowProposedApi: true,
+    scrollOnOutput: true
   });
 
   const fitAddon = new FitAddon();
