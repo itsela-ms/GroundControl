@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const SessionService = require('./session-service');
@@ -6,6 +6,7 @@ const PtyManager = require('./pty-manager');
 const TagIndexer = require('./tag-indexer');
 const ResourceIndexer = require('./resource-indexer');
 const SettingsService = require('./settings-service');
+const NotificationService = require('./notification-service');
 
 let mainWindow;
 let sessionService;
@@ -13,10 +14,12 @@ let ptyManager;
 let tagIndexer;
 let resourceIndexer;
 let settingsService;
+let notificationService;
 
 const COPILOT_PATH = path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', 'copilot.exe');
 const SESSION_STATE_DIR = path.join(process.env.USERPROFILE, '.copilot', 'session-state');
 const COPILOT_CONFIG_DIR = path.join(process.env.USERPROFILE, '.copilot');
+const NOTIFICATIONS_DIR = path.join(COPILOT_CONFIG_DIR, 'notifications');
 const INSTRUCTIONS_PATH = path.join(COPILOT_CONFIG_DIR, 'copilot-instructions.md');
 
 function createWindow() {
@@ -62,16 +65,35 @@ app.whenReady().then(async () => {
 
   await sessionService.cleanEmptySessions();
 
+  notificationService = new NotificationService(NOTIFICATIONS_DIR);
+  notificationService.start();
+
   createWindow();
 
-  // IPC: Get session list (with tags and resources)
-  ipcMain.handle('sessions:list', async () => {
-    const sessions = await sessionService.listSessions();
-    return sessions.map(s => ({
-      ...s,
-      tags: tagIndexer.getTagsForSession(s.id),
-      resources: resourceIndexer.getResourcesForSession(s.id)
-    }));
+  // Forward notifications to renderer + show OS notification
+  notificationService.on('notification', (notification) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('notification:new', notification);
+    }
+
+    // System tray notification
+    const ICONS = { 'task-done': '✅', 'needs-input': '⏳', 'error': '❌', 'info': 'ℹ️' };
+    const icon = ICONS[notification.type] || 'ℹ️';
+    const osNotif = new Notification({
+      title: `${icon} ${notification.title}`,
+      body: notification.body || '',
+      silent: notification.type === 'info',
+    });
+    osNotif.on('click', () => {
+      if (mainWindow) {
+        mainWindow.show();
+        mainWindow.focus();
+        if (notification.sessionId) {
+          mainWindow.webContents.send('notification:click', notification);
+        }
+      }
+    });
+    osNotif.show();
   });
 
   // IPC: Open/resume a session
@@ -146,6 +168,42 @@ app.whenReady().then(async () => {
     }
   });
 
+  // IPC: Notifications
+  ipcMain.handle('notifications:getAll', () => notificationService.getAll());
+  ipcMain.handle('notifications:getUnreadCount', () => notificationService.getUnreadCount());
+  ipcMain.handle('notifications:markRead', (event, id) => notificationService.markRead(id));
+  ipcMain.handle('notifications:markAllRead', () => notificationService.markAllRead());
+  ipcMain.handle('notifications:dismiss', (event, id) => notificationService.dismiss(id));
+  ipcMain.handle('notifications:clearAll', () => notificationService.clearAll());
+
+  // Auto-notify on session exit
+  ptyManager.on('exit', (sessionId, exitCode) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('pty:exit', { sessionId, exitCode });
+    }
+    // Push a notification for session exit
+    const session = allSessionsCache.find(s => s.id === sessionId);
+    const title = session?.title || sessionId.substring(0, 8);
+    notificationService.push({
+      type: exitCode === 0 ? 'task-done' : 'error',
+      title: exitCode === 0 ? `Session ended: ${title}` : `Session error: ${title}`,
+      body: `Exited with code ${exitCode}`,
+      sessionId,
+    });
+  });
+
+  // IPC: Get session list (with tags and resources) — also caches for notification titles
+  let allSessionsCache = [];
+  ipcMain.handle('sessions:list', async () => {
+    const sessions = await sessionService.listSessions();
+    allSessionsCache = sessions.map(s => ({
+      ...s,
+      tags: tagIndexer.getTagsForSession(s.id),
+      resources: resourceIndexer.getResourcesForSession(s.id)
+    }));
+    return allSessionsCache;
+  });
+
   // Forward pty output to renderer — batch at 16ms intervals to prevent IPC flooding
   const ptyDataBuffers = new Map(); // sessionId -> string[]
   let ptyFlushTimer = null;
@@ -169,17 +227,12 @@ app.whenReady().then(async () => {
       ptyFlushTimer = setTimeout(flushPtyData, 16);
     }
   });
-
-  ptyManager.on('exit', (sessionId, exitCode) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('pty:exit', { sessionId, exitCode });
-    }
-  });
 });
 
 app.on('window-all-closed', () => {
   tagIndexer.stop();
   resourceIndexer.stop();
+  notificationService.stop();
   ptyManager.killAll();
   app.quit();
 });

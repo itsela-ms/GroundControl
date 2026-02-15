@@ -34,4 +34,22 @@ contextBridge.exposeInMainWorld('api', {
 
   // Shell
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+
+  // Notifications
+  getNotifications: () => ipcRenderer.invoke('notifications:getAll'),
+  getUnreadCount: () => ipcRenderer.invoke('notifications:getUnreadCount'),
+  markNotificationRead: (id) => ipcRenderer.invoke('notifications:markRead', id),
+  markAllNotificationsRead: () => ipcRenderer.invoke('notifications:markAllRead'),
+  dismissNotification: (id) => ipcRenderer.invoke('notifications:dismiss', id),
+  clearAllNotifications: () => ipcRenderer.invoke('notifications:clearAll'),
+  onNotification: (callback) => {
+    const listener = (event, notification) => callback(notification);
+    ipcRenderer.on('notification:new', listener);
+    return () => ipcRenderer.removeListener('notification:new', listener);
+  },
+  onNotificationClick: (callback) => {
+    const listener = (event, notification) => callback(notification);
+    ipcRenderer.on('notification:click', listener);
+    return () => ipcRenderer.removeListener('notification:click', listener);
+  },
 });

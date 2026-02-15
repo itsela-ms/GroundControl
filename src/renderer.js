@@ -51,6 +51,12 @@ const btnSettings = document.getElementById('btn-settings');
 const resourcePanel = document.getElementById('resource-panel');
 const resourcePanelContent = document.getElementById('resource-panel-content');
 const btnToggleResources = document.getElementById('btn-toggle-resources');
+const notificationBadge = document.getElementById('notification-badge');
+const notificationPanel = document.getElementById('notification-panel');
+const notificationListEl = document.getElementById('notification-list');
+const toastContainer = document.getElementById('toast-container');
+
+const NOTIF_ICONS = { 'task-done': '✅', 'needs-input': '⏳', 'error': '❌', 'info': 'ℹ️' };
 
 // Initialize
 async function init() {
@@ -134,6 +140,31 @@ async function init() {
     btnToggleResources.classList.remove('active');
     fitActiveTerminal();
   });
+
+  // Notifications
+  document.getElementById('btn-notifications').addEventListener('click', toggleNotificationPanel);
+  document.getElementById('btn-close-notifications').addEventListener('click', () => notificationPanel.classList.add('hidden'));
+  document.getElementById('btn-mark-all-read').addEventListener('click', async () => {
+    await window.api.markAllNotificationsRead();
+    await refreshNotifications();
+  });
+  document.getElementById('btn-clear-notifications').addEventListener('click', async () => {
+    await window.api.clearAllNotifications();
+    await refreshNotifications();
+  });
+
+  window.api.onNotification((notification) => {
+    showToast(notification);
+    refreshNotifications();
+  });
+
+  window.api.onNotificationClick((notification) => {
+    if (notification.sessionId) {
+      openSession(notification.sessionId);
+    }
+  });
+
+  await refreshNotifications();
 }
 
 function applyTheme(theme) {
@@ -247,6 +278,17 @@ function renderSessionList() {
       ${tagsHtml}
       ${resourcesHtml}
     `;
+
+    // Add notification badge if session has unread notifications
+    window.api.getNotifications().then(notifications => {
+      const unread = notifications.filter(n => !n.read && n.sessionId === session.id).length;
+      if (unread > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'session-notification-badge';
+        badge.textContent = unread;
+        el.querySelector('.session-title').appendChild(badge);
+      }
+    });
 
     el.addEventListener('click', () => openSession(session.id));
     sessionList.appendChild(el);
@@ -828,6 +870,109 @@ maxConcurrentInput.addEventListener('change', (e) => {
   const val = parseInt(e.target.value, 10);
   if (val >= 1 && val <= 20) window.api.updateSettings({ maxConcurrent: val });
 });
+
+// Notification functions
+function toggleNotificationPanel() {
+  notificationPanel.classList.toggle('hidden');
+}
+
+async function refreshNotifications() {
+  const notifications = await window.api.getNotifications();
+  const unread = notifications.filter(n => !n.read).length;
+
+  // Update badge
+  if (unread > 0) {
+    notificationBadge.textContent = unread > 99 ? '99+' : unread;
+    notificationBadge.classList.remove('hidden');
+  } else {
+    notificationBadge.classList.add('hidden');
+  }
+
+  // Update dropdown list
+  if (notifications.length === 0) {
+    notificationListEl.innerHTML = '<div class="notification-empty">No notifications</div>';
+    return;
+  }
+
+  notificationListEl.innerHTML = notifications
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+    .map(n => {
+      const icon = NOTIF_ICONS[n.type] || 'ℹ️';
+      const cls = n.read ? '' : ' unread';
+      const time = formatNotifTime(n.timestamp);
+      return `<div class="notification-item${cls}" data-id="${n.id}" data-session="${n.sessionId || ''}">
+        <div class="notification-icon">${icon}</div>
+        <div class="notification-content">
+          <div class="notification-title">${escapeHtml(n.title)}</div>
+          ${n.body ? `<div class="notification-body">${escapeHtml(n.body)}</div>` : ''}
+          <div class="notification-time">${time}</div>
+        </div>
+        <button class="notification-dismiss" data-dismiss="${n.id}" title="Dismiss">✕</button>
+      </div>`;
+    }).join('');
+
+  // Wire up click handlers
+  notificationListEl.querySelectorAll('.notification-item').forEach(el => {
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('.notification-dismiss')) return;
+      const id = parseInt(el.dataset.id);
+      const sessionId = el.dataset.session;
+      await window.api.markNotificationRead(id);
+      if (sessionId) openSession(sessionId);
+      notificationPanel.classList.add('hidden');
+      refreshNotifications();
+    });
+  });
+
+  notificationListEl.querySelectorAll('.notification-dismiss').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = parseInt(btn.dataset.dismiss);
+      await window.api.dismissNotification(id);
+      refreshNotifications();
+    });
+  });
+}
+
+function formatNotifTime(timestamp) {
+  const d = new Date(timestamp);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  return d.toLocaleDateString();
+}
+
+function showToast(notification) {
+  const icon = NOTIF_ICONS[notification.type] || 'ℹ️';
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = `
+    <div class="toast-icon">${icon}</div>
+    <div class="toast-content">
+      <div class="toast-title">${escapeHtml(notification.title)}</div>
+      ${notification.body ? `<div class="toast-body">${escapeHtml(notification.body)}</div>` : ''}
+    </div>`;
+
+  toast.addEventListener('click', () => {
+    if (notification.sessionId) openSession(notification.sessionId);
+    toast.classList.add('toast-out');
+    setTimeout(() => toast.remove(), 300);
+  });
+
+  toastContainer.appendChild(toast);
+
+  // Auto-dismiss after 6 seconds
+  setTimeout(() => {
+    if (toast.parentNode) {
+      toast.classList.add('toast-out');
+      setTimeout(() => toast.remove(), 300);
+    }
+  }, 6000);
+}
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {

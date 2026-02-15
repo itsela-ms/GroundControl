@@ -12,10 +12,14 @@
   <div id="titlebar">
     <span class="titlebar-text">Copilot Sessions</span>
     <div class="titlebar-actions">
+      <button id="btn-notifications" title="Notifications">🔔<span id="notification-badge" class="notification-badge hidden">0</span></button>
       <button id="btn-instructions" title="View Instructions">📖 Instructions</button>
       <button id="btn-settings" title="Settings">⚙</button>
     </div>
   </div>
+
+  <!-- Toast container -->
+  <div id="toast-container"></div>
 
   <div id="app">
     <!-- Sidebar -->
@@ -111,6 +115,21 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Notification dropdown -->
+  <div id="notification-panel" class="notification-panel hidden">
+    <div class="notification-panel-header">
+      <span>Notifications</span>
+      <div class="notification-panel-actions">
+        <button id="btn-mark-all-read" class="btn-link" title="Mark all as read">✓ All</button>
+        <button id="btn-clear-notifications" class="btn-link" title="Clear all">Clear</button>
+        <button id="btn-close-notifications" class="btn-icon">✕</button>
+      </div>
+    </div>
+    <div id="notification-list" class="notification-list">
+      <div class="notification-empty">No notifications</div>
     </div>
   </div>
 
