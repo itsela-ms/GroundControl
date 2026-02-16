@@ -38,6 +38,7 @@ const XTERM_THEMES = {
 // DOM elements
 const sessionList = document.getElementById('session-list');
 const searchInput = document.getElementById('search');
+const searchClear = document.getElementById('search-clear');
 const terminalContainer = document.getElementById('terminal-container');
 const terminalTabs = document.getElementById('terminal-tabs');
 const emptyState = document.getElementById('empty-state');
@@ -1066,7 +1067,18 @@ document.addEventListener('mouseup', () => {
 });
 
 // Events
-searchInput.addEventListener('input', (e) => { searchQuery = e.target.value; renderSessionList(); });
+searchInput.addEventListener('input', (e) => {
+  searchQuery = e.target.value;
+  searchClear.classList.toggle('hidden', !searchQuery);
+  renderSessionList();
+});
+searchClear.addEventListener('click', () => {
+  searchInput.value = '';
+  searchQuery = '';
+  searchClear.classList.add('hidden');
+  renderSessionList();
+  searchInput.focus();
+});
 btnNew.addEventListener('click', newSession);
 btnNewCenter.addEventListener('click', newSession);
 
@@ -1207,6 +1219,7 @@ document.addEventListener('keydown', (e) => {
     } else if (document.activeElement === searchInput) {
       searchInput.value = '';
       searchQuery = '';
+      searchClear.classList.add('hidden');
       renderSessionList();
       if (activeSessionId && terminals.has(activeSessionId)) terminals.get(activeSessionId).terminal.focus();
     }

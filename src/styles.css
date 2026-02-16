@@ -131,7 +131,7 @@ body {
 
 #search {
   width: 100%;
-  padding: 8px 12px;
+  padding: 8px 28px 8px 12px;
   background: var(--bg-overlay);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -147,6 +147,34 @@ body {
 
 #search::placeholder {
   color: var(--text-dimmer);
+}
+
+#search-wrapper {
+  position: relative;
+}
+
+.search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.search-clear:hover {
+  color: var(--text);
+  background: var(--bg-overlay);
+}
+
+.search-clear.hidden {
+  display: none;
 }
 
 #sidebar-actions {

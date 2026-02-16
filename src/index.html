@@ -26,7 +26,10 @@
     <!-- Sidebar -->
     <aside id="sidebar">
       <div id="sidebar-header">
-        <input type="text" id="search" placeholder="Search sessions & tags..." autocomplete="off" spellcheck="false">
+        <div id="search-wrapper">
+          <input type="text" id="search" placeholder="Search sessions & tags..." autocomplete="off" spellcheck="false">
+          <button id="search-clear" class="search-clear hidden" title="Clear search (Esc)">✕</button>
+        </div>
       </div>
       <div id="sidebar-actions">
         <button id="btn-new" title="New Session (Ctrl+N)">+ New Session</button>
