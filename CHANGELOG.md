@@ -2,6 +2,15 @@
 
 All notable changes to DeepSky are documented here.
 
+## [0.5.1] - 2026-02-16
+
+### Changed
+- Rebranded from GroundControl to DeepSky — new name, new icon, new identity
+- Switched to dark icon variant for better taskbar/tray visibility
+
+### Added
+- Session rename — double-click any session title in the sidebar to rename it
+
 ## [0.4.0] - 2025-02-15
 
 ### Added

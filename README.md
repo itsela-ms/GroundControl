@@ -1,39 +1,60 @@
-# DeepSky
+# DeepSky ✦
 
-> Ground Control to Major Tom — your mission control for GitHub Copilot CLI sessions.
+**Your command center for GitHub Copilot CLI.**
 
-Session manager for GitHub Copilot CLI — visual overview, instant switching, and easy resume instead of hunting for session IDs.
+Stop juggling session IDs. DeepSky gives you a sleek desktop app to manage, search, and switch between all your Copilot CLI sessions — so you can focus on building, not bookkeeping.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
-![Electron](https://img.shields.io/badge/Electron-35+-47848F?logo=electron)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-## The Problem
+---
 
-Copilot CLI supports `--resume <sessionId>`, but managing sessions means remembering UUIDs, digging through `~/.copilot/session-state/`, and having no way to see what's running. DeepSky gives you a visual command center for all of that.
+## Why DeepSky?
 
-## Features
+Copilot CLI is powerful, but managing sessions is painful. You're copying UUIDs, grepping through directories, and losing track of what's running. DeepSky fixes all of that with a visual interface purpose-built for power users.
 
-- **Session sidebar** — Browse all sessions with auto-generated titles, search by title/tags/resources
-- **Active & History tabs** — See what's running vs. completed at a glance
-- **Embedded terminal** — Full xterm.js terminal with seamless session switching
-- **Concurrent sessions** — Keep multiple sessions alive in background, oldest evicted when limit is reached
-- **Smart search** — Find sessions by title, tags, or linked resources (PRs, work items, repos)
-- **Resource panel** — Clickable links to PRs, work items, repos, and wiki pages per session
-- **Instructions viewer** — Rendered `copilot-instructions.md` with TOC and collapsible sections
-- **Catppuccin themes** — Mocha (dark) and Latte (light), persisted
-- **Keyboard shortcuts** — `Ctrl+N` new, `Ctrl+Tab` switch, `Ctrl+W` close, `Esc` dismiss panels
+## ✨ Features
+
+### Session Management
+- **Visual sidebar** with all your sessions — active and historical — searchable by title, tags, or linked resources
+- **Concurrent sessions** — keep multiple sessions alive in the background with smart eviction when you hit the limit
+- **Session rename** — double-click any title to give it a meaningful name
+- **Instant resume** — click to reopen any past session exactly where you left off
+
+### Embedded Terminal
+- Full-featured terminal with 10,000-line scrollback, link detection, and clipboard support
+- Multi-tab interface — switch between sessions like browser tabs
+- Seamless session switching without losing state
+
+### Smart Search & Resources
+- Find sessions by title, tags, PR numbers, work item IDs, or repo names
+- **Resource panel** — every session shows its linked PRs, work items, repos, and wiki pages as clickable links
+
+### Notifications
+- Real-time alerts when tasks complete, sessions error out, or input is needed
+- Badge counter, dropdown panel, toast popups, and native OS notifications
+- Never miss a completed build or a session waiting for input again
+
+### Custom Instructions
+- Built-in viewer for your `copilot-instructions.md` with Markdown rendering, collapsible sections, and table of contents
+- Import/export and merge instructions across projects
+
+### Polish
+- **Catppuccin themes** — Mocha (dark) and Latte (light), because aesthetics matter
+- **Keyboard-first** — `Ctrl+N` new session, `Ctrl+Tab` switch, `Ctrl+W` close, `Esc` dismiss
+- **Auto-updates** — new versions download and install in the background
+
+---
 
 ## Installation
 
-### From Installer (recommended)
+### Installer (recommended)
 
-1. Download the latest `DeepSky Setup x.x.x.exe` from [Releases](https://github.com/itsela-ms/DeepSky/releases)
-2. Run the installer — it installs to your user profile and adds a Start Menu entry
+1. Download the latest `DeepSky Setup x.x.x.exe` from [**Releases**](https://github.com/itsela-ms/DeepSky/releases)
+2. Run the installer — installs to your user profile with a Start Menu entry
 3. Launch DeepSky from the Start Menu
 
-**Prerequisite:** [GitHub Copilot CLI](https://github.com/github/copilot-cli) — `winget install github.copilot`
-
-> **Upgrading from the portable `.exe`?** Delete the old portable executable manually, then run the installer. Future updates are handled automatically.
+> **Prerequisite:** [GitHub Copilot CLI](https://github.com/github/copilot-cli) — `winget install github.copilot`
 
 ### From Source
 
@@ -41,53 +62,29 @@ Copilot CLI supports `--resume <sessionId>`, but managing sessions means remembe
 git clone https://github.com/itsela-ms/DeepSky.git
 cd DeepSky
 npm install
-
-# Run directly
 npm start
-
-# Build Windows installer
-npm run dist
 ```
+
+---
 
 ## Updates
 
-DeepSky checks for updates automatically on startup. When a new version is available:
+DeepSky checks for updates automatically on startup. You can also check manually via **Settings → About → Check for Updates**. Downloads happen in the background — click **Restart & Update** when ready.
 
-1. Open **Settings** (⚙ in the title bar)
-2. Scroll to the **About** section — you'll see the update status
-3. Click **Download Update** to download in the background
-4. Click **Restart & Update** when the download completes
+---
 
-You can also click **Check for Updates** at any time to manually check.
+## Keyboard Shortcuts
 
-### Publishing a New Release
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+N` | New session |
+| `Ctrl+Tab` | Next tab |
+| `Ctrl+Shift+Tab` | Previous tab |
+| `Ctrl+W` | Close tab |
+| `Ctrl+V` / `Shift+Ins` | Paste |
+| `Esc` | Dismiss panels / clear search |
 
-1. Bump the version in `package.json`
-2. Update `CHANGELOG.md` with the new version's changes
-3. Build the installer: `npm run dist`
-4. Create a GitHub Release tagged `vX.Y.Z`
-5. Upload these files from `release/`:
-   - `DeepSky Setup X.Y.Z.exe`
-   - `DeepSky Setup X.Y.Z.exe.blockmap`
-   - `latest.yml` (generated by electron-builder, required for auto-update)
-6. All installed clients will pick up the update on next launch
-
-## Architecture
-
-| File | Role |
-|------|------|
-| `src/main.js` | Electron main process, IPC handlers |
-| `src/renderer.js` | Renderer: sidebar, terminals, panels, settings |
-| `src/index.html` | App layout |
-| `src/styles.css` | Catppuccin dual-theme CSS |
-| `src/pty-manager.js` | Concurrent copilot.exe PTY management with eviction |
-| `src/session-service.js` | Reads `~/.copilot/session-state/` |
-| `src/tag-indexer.js` | Extracts and caches session tags |
-| `src/resource-indexer.js` | Extracts PRs, work items, repos, wikis from events |
-| `src/settings-service.js` | Persists settings to `~/.copilot/session-gui-settings.json` |
-| `src/update-service.js` | Auto-update via electron-updater + GitHub Releases |
-| `src/preload.js` | Context bridge API |
-| `launch.vbs` | Windowless VBS launcher |
+---
 
 ## License
 
