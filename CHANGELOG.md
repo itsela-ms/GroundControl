@@ -2,6 +2,23 @@
 
 All notable changes to DeepSky are documented here.
 
+## [0.5.2] - 2026-02-17
+
+### Changed
+- Smoother UI — softer borders in dark mode, eased transitions, borderless ghost buttons
+- Clean icon glyphs (⚐ ☰ ⚙ ⊞) replace emojis everywhere, labels shown on hover
+- Simplified update flow — single "Check for Updates" button, auto-downloads, prompts to restart
+
+### Added
+- Session persistence — open tabs and active tab restored on startup
+- Session delete — red ✕ on hover in history tab with confirmation dialog
+- Middle-click to close terminal tabs
+- Running session indicator — green dot with subtle glow
+
+### Fixed
+- Horizontal scroll in sidebar active tab
+- Inconsistent border colors in dark mode
+
 ## [0.5.1] - 2026-02-16
 
 ### Changed
