@@ -49,14 +49,22 @@
       <!-- Terminal area (default view) -->
       <div id="terminal-area">
         <div id="terminal-tabs">
-          <button id="btn-toggle-resources" title="Links">⊞</button>
+          <button id="btn-toggle-resources" title="Links">🔗</button>
         </div>
         <div id="terminal-main-row">
           <div id="terminal-container">
             <div id="empty-state">
-              <div class="empty-icon">DeepSky</div>
-              <p>Select a session or start a new one</p>
-              <button id="btn-new-center">+ New Session</button>
+              <div id="session-dashboard">
+                <div class="dashboard-header">
+                  <h2 class="dashboard-title">Session Dashboard</h2>
+                  <button id="btn-new-center" title="New Session (Ctrl+N)">+ New Session</button>
+                </div>
+                <div id="dashboard-grid" class="dashboard-grid"></div>
+                <div id="dashboard-empty" class="dashboard-empty">
+                  <div class="empty-icon">DeepSky</div>
+                  <p>No sessions yet. Start a new one to get going.</p>
+                </div>
+              </div>
             </div>
           </div>
 

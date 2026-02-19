@@ -313,6 +313,13 @@ body {
   color: color-mix(in srgb, var(--red) 120%, white);
 }
 
+.session-header-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .session-title {
   font-size: 13px;
   font-weight: 500;
@@ -321,6 +328,45 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   margin-bottom: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.session-state {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.4;
+}
+
+.session-state.state-idle {
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
+  color: var(--text-dim);
+}
+
+.session-state.state-working {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+}
+
+.session-state.state-waiting {
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+  color: var(--yellow);
+}
+
+.session-state.state-pending {
+  background: color-mix(in srgb, var(--mauve) 15%, transparent);
+  color: var(--mauve);
+}
+
+.session-state.state-done {
+  background: color-mix(in srgb, var(--teal) 15%, transparent);
+  color: var(--teal);
 }
 
 .session-rename-input {
@@ -578,6 +624,142 @@ body {
 #btn-new-center:hover {
   background: var(--accent-hover);
 }
+
+/* Session Dashboard */
+#session-dashboard {
+  width: 100%;
+  height: 100%;
+  padding: 32px;
+  overflow-y: auto;
+}
+
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.dashboard-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.3px;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.dashboard-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashboard-card:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.dashboard-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dashboard-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.dashboard-card-state {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dashboard-card-state.state-working { background: rgba(166, 227, 161, 0.15); color: var(--green); }
+.dashboard-card-state.state-waiting { background: rgba(249, 226, 175, 0.15); color: var(--yellow); }
+.dashboard-card-state.state-pending { background: rgba(203, 166, 247, 0.15); color: var(--mauve); }
+.dashboard-card-state.state-done { background: rgba(148, 226, 213, 0.15); color: var(--teal); }
+.dashboard-card-state.state-idle { background: rgba(108, 112, 134, 0.15); color: var(--text-dim); }
+
+.dashboard-card-duration {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.dashboard-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.dashboard-card-tags .tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-overlay);
+  color: var(--text-dim);
+}
+
+.dashboard-card-tags .tag.repo { color: var(--accent); background: rgba(137, 180, 250, 0.1); }
+.dashboard-card-tags .tag.tool { color: var(--teal); background: rgba(148, 226, 213, 0.1); }
+
+.dashboard-card-resources {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dashboard-card-resources .resource-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.dashboard-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 0;
+  gap: 16px;
+  color: var(--text-dim);
+}
+
+.dashboard-empty .empty-icon {
+  font-size: 48px;
+  opacity: 0.3;
+}
+
+.dashboard-empty p {
+  font-size: 14px;
+}
+
+[data-theme="latte"] .dashboard-card-state.state-working { background: rgba(64, 160, 43, 0.12); }
+[data-theme="latte"] .dashboard-card-state.state-waiting { background: rgba(223, 142, 29, 0.12); }
+[data-theme="latte"] .dashboard-card-state.state-pending { background: rgba(136, 57, 239, 0.12); }
+[data-theme="latte"] .dashboard-card-state.state-done { background: rgba(23, 146, 153, 0.12); }
+[data-theme="latte"] .dashboard-card-state.state-idle { background: rgba(124, 127, 147, 0.12); }
 
 /* Date grouping in sidebar */
 .session-date-group {
@@ -1313,10 +1495,17 @@ body {
 }
 
 .resource-link .resource-icon {
-  font-size: 13px;
+  font-size: 10px;
+  font-weight: 700;
   flex-shrink: 0;
-  width: 18px;
+  min-width: 18px;
+  width: auto;
   text-align: center;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  background: color-mix(in srgb, var(--text-dim) 15%, transparent);
+  color: var(--text-dim);
 }
 
 .resource-link .resource-label {
