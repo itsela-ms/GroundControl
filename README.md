@@ -5,6 +5,7 @@
 Stop juggling session IDs. DeepSky gives you a sleek desktop app to manage, search, and switch between all your Copilot CLI sessions — so you can focus on building, not bookkeeping.
 
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
+![macOS](https://img.shields.io/badge/platform-macOS-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -48,13 +49,21 @@ Copilot CLI is powerful, but managing sessions is painful. You're copying UUIDs,
 
 ## Installation
 
-### Installer (recommended)
+### Windows Installer (recommended)
 
 1. Download the latest `DeepSky Setup x.x.x.exe` from [**Releases**](https://github.com/itsela-ms/DeepSky/releases)
 2. Run the installer — installs to your user profile with a Start Menu entry
 3. Launch DeepSky from the Start Menu
 
 > **Prerequisite:** [GitHub Copilot CLI](https://github.com/github/copilot-cli) — `winget install github.copilot`
+
+### macOS Installer
+
+1. Download the latest `DeepSky-x.x.x.dmg` from [**Releases**](https://github.com/itsela-ms/DeepSky/releases)
+2. Open the DMG and drag DeepSky to Applications
+3. Launch DeepSky from Applications or Spotlight
+
+> **Prerequisite:** [GitHub Copilot CLI](https://github.com/github/copilot-cli) — `brew install github/gh/copilot`
 
 ### From Source
 
@@ -75,14 +84,14 @@ DeepSky checks for updates automatically on startup. You can also check manually
 
 ## Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+N` | New session |
-| `Ctrl+Tab` | Next tab |
-| `Ctrl+Shift+Tab` | Previous tab |
-| `Ctrl+W` | Close tab |
-| `Ctrl+V` / `Shift+Ins` | Paste |
-| `Esc` | Dismiss panels / clear search |
+| Shortcut | macOS | Action |
+|----------|-------|--------|
+| `Ctrl+N` | `Cmd+N` | New session |
+| `Ctrl+Tab` | `Ctrl+Tab` | Next tab |
+| `Ctrl+Shift+Tab` | `Ctrl+Shift+Tab` | Previous tab |
+| `Ctrl+W` | `Cmd+W` | Close tab |
+| `Ctrl+V` / `Shift+Ins` | `Cmd+V` | Paste |
+| `Esc` | `Esc` | Dismiss panels / clear search |
 
 ---
 

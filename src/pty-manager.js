@@ -1,6 +1,8 @@
 const EventEmitter = require('events');
 const crypto = require('crypto');
 
+const os = require('os');
+
 // Default to node-pty, but allow injection for testing
 let defaultPty;
 try { defaultPty = require('node-pty'); } catch { defaultPty = null; }
@@ -42,7 +44,7 @@ class PtyManager extends EventEmitter {
         name: 'xterm-256color',
         cols: 120,
         rows: 40,
-        cwd: process.env.USERPROFILE,
+        cwd: os.homedir(),
         env: { ...process.env, TERM: 'xterm-256color' }
       });
     } catch (err) {
@@ -86,7 +88,7 @@ class PtyManager extends EventEmitter {
         name: 'xterm-256color',
         cols: 120,
         rows: 40,
-        cwd: process.env.USERPROFILE,
+        cwd: os.homedir(),
         env: { ...process.env, TERM: 'xterm-256color' }
       });
     } catch (err) {

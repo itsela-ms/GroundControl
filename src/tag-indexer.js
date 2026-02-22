@@ -13,6 +13,7 @@ const TOOL_TAGS = {
   'workiq': 'work-iq',
   'nexus-meridian': 'nexus-meridian',
   'github-mcp-server': 'github',
+  'sql': 'sql',
 };
 const TOPIC_KEYWORDS = {
   'deploy': 'deployment',
@@ -49,6 +50,8 @@ const TOPIC_KEYWORDS = {
   'debug': 'debugging',
   'error': 'errors',
   'SQL': 'sql',
+  'sqlite': 'sql',
+  'database': 'sql',
   'retry': 'retry-logic',
 };
 

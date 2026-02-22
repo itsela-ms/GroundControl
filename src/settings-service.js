@@ -6,7 +6,7 @@ const DEFAULTS = {
   sidebarWidth: 280,
   lastActiveTab: 'active', // 'active' or 'history'
   theme: 'mocha', // 'mocha' or 'latte'
-  copilotPath: '', // auto-detect if empty; override with full path to copilot.exe
+  copilotPath: '', // auto-detect if empty; override with full path to copilot binary
   openTabs: [], // session IDs of tabs to restore on startup
   activeTab: null, // session ID of the last active tab
 };
