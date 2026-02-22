@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Notification, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Notification, Menu, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const SessionService = require('./session-service');
@@ -301,11 +301,57 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('window-all-closed', () => {
+const GRACEFUL_POLL_MS = 3000;
+const GRACEFUL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const BUSY_THRESHOLD_MS = 5000;
+
+app.on('window-all-closed', async () => {
   tagIndexer.stop();
   resourceIndexer.stop();
   notificationService.stop();
   if (ptyFlushTimer) { clearTimeout(ptyFlushTimer); ptyFlushTimer = null; }
-  ptyManager.killAll();
-  app.quit();
+
+  // Kill sessions that are idle (not producing output)
+  ptyManager.killIdle(BUSY_THRESHOLD_MS);
+
+  const busy = ptyManager.getBusySessions(BUSY_THRESHOLD_MS);
+  if (busy.length === 0) {
+    ptyManager.killAll();
+    app.quit();
+    return;
+  }
+
+  // Busy sessions detected — ask user what to do
+  const sessionWord = busy.length === 1 ? 'session is' : 'sessions are';
+  const { response } = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Let them finish (up to 10 min)', 'Kill all and quit'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Sessions still working',
+    message: `${busy.length} ${sessionWord} still processing.`,
+    detail: 'AI is actively running. You can let it finish in the background or kill everything now.'
+  });
+
+  if (response === 1) {
+    ptyManager.killAll();
+    app.quit();
+    return;
+  }
+
+  // Graceful shutdown — poll until all sessions go quiet or timeout
+  const startedAt = Date.now();
+  const pollTimer = setInterval(() => {
+    // Kill any sessions that have gone quiet since last poll
+    ptyManager.killIdle(BUSY_THRESHOLD_MS);
+
+    const remaining = ptyManager.getBusySessions(BUSY_THRESHOLD_MS);
+    const timedOut = (Date.now() - startedAt) >= GRACEFUL_TIMEOUT_MS;
+
+    if (remaining.length === 0 || timedOut) {
+      clearInterval(pollTimer);
+      ptyManager.killAll();
+      app.quit();
+    }
+  }, GRACEFUL_POLL_MS);
 });

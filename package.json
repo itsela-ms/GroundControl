@@ -1,6 +1,6 @@
 {
   "name": "deepsky",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Your command center for GitHub Copilot CLI — manage, search, and switch between sessions from a sleek desktop app.",
   "main": "src/main.js",
   "author": "itsela-ms",
@@ -9,6 +9,7 @@
     "build": "esbuild src/renderer.js --bundle --outfile=dist/renderer.js --platform=browser --format=iife",
     "start": "npm run build && electron . --no-sandbox",
     "launch": "npm run build && wscript launch.vbs",
+    "test": "vitest run",
     "dist": "npm run build && electron-builder --win"
   },
   "build": {
@@ -52,6 +53,7 @@
   "devDependencies": {
     "electron": "^35.0.0",
     "electron-builder": "^26.7.0",
-    "esbuild": "^0.27.3"
+    "esbuild": "^0.27.3",
+    "vitest": "^4.0.18"
   }
 }

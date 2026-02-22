@@ -2,6 +2,26 @@
 
 All notable changes to DeepSky are documented here.
 
+## [0.5.4] - 2026-02-22
+
+### Added
+- Session dashboard view when no tabs are open
+- Live session status polling — badges update every 3s based on actual pty output
+- Session state now uses `isBusy` (recent output) instead of focused-session heuristic
+- Graceful shutdown — busy sessions stay alive in background when closing (10-min timeout)
+- Close confirmation dialog when AI sessions are still processing
+- Unit test infrastructure (Vitest) with 27 tests for session-state and pty-manager
+- Extracted `session-state.js` — pure function for state derivation
+
+### Changed
+- "Working" state now means AI is actively outputting (green), "Waiting" means idle terminal (yellow)
+- `pty-manager` tracks `lastDataAt` per session and exposes it via `getActiveSessions()`
+- `pty-manager` accepts injectable pty module for testability
+
+### Fixed
+- Notification click not focusing the target session (rAF race condition)
+- Session state badges going stale between discrete UI events
+
 ## [0.5.3] - 2026-02-19
 
 ### Added

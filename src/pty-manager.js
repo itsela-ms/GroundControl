@@ -1,13 +1,17 @@
 const EventEmitter = require('events');
-const pty = require('node-pty');
 const crypto = require('crypto');
 
+// Default to node-pty, but allow injection for testing
+let defaultPty;
+try { defaultPty = require('node-pty'); } catch { defaultPty = null; }
+
 class PtyManager extends EventEmitter {
-  constructor(copilotPath, settingsService) {
+  constructor(copilotPath, settingsService, ptyModule) {
     super();
     this.copilotPath = copilotPath;
     this.sessions = new Map();
     this.settingsService = settingsService;
+    this._pty = ptyModule || defaultPty;
   }
 
   _generateId() {
@@ -34,7 +38,7 @@ class PtyManager extends EventEmitter {
 
     let ptyProcess;
     try {
-      ptyProcess = pty.spawn(this.copilotPath, ['--resume', sessionId, '--yolo'], {
+      ptyProcess = this._pty.spawn(this.copilotPath, ['--resume', sessionId, '--yolo'], {
         name: 'xterm-256color',
         cols: 120,
         rows: 40,
@@ -47,7 +51,10 @@ class PtyManager extends EventEmitter {
 
     ptyProcess.onData((data) => {
       const entry = this.sessions.get(sessionId);
-      if (entry && entry.alive) this.emit('data', sessionId, data);
+      if (entry && entry.alive) {
+        entry.lastDataAt = Date.now();
+        this.emit('data', sessionId, data);
+      }
     });
 
     ptyProcess.onExit(({ exitCode }) => {
@@ -61,7 +68,8 @@ class PtyManager extends EventEmitter {
     this.sessions.set(sessionId, {
       pty: ptyProcess,
       alive: true,
-      openedAt: Date.now()
+      openedAt: Date.now(),
+      lastDataAt: Date.now()
     });
 
     return sessionId;
@@ -74,7 +82,7 @@ class PtyManager extends EventEmitter {
 
     let ptyProcess;
     try {
-      ptyProcess = pty.spawn(this.copilotPath, ['--resume', sessionId, '--yolo'], {
+      ptyProcess = this._pty.spawn(this.copilotPath, ['--resume', sessionId, '--yolo'], {
         name: 'xterm-256color',
         cols: 120,
         rows: 40,
@@ -87,7 +95,10 @@ class PtyManager extends EventEmitter {
 
     ptyProcess.onData((data) => {
       const entry = this.sessions.get(sessionId);
-      if (entry && entry.alive) this.emit('data', sessionId, data);
+      if (entry && entry.alive) {
+        entry.lastDataAt = Date.now();
+        this.emit('data', sessionId, data);
+      }
     });
 
     ptyProcess.onExit(({ exitCode }) => {
@@ -101,7 +112,8 @@ class PtyManager extends EventEmitter {
     this.sessions.set(sessionId, {
       pty: ptyProcess,
       alive: true,
-      openedAt: Date.now()
+      openedAt: Date.now(),
+      lastDataAt: Date.now()
     });
 
     return sessionId;
@@ -143,10 +155,43 @@ class PtyManager extends EventEmitter {
     const result = [];
     for (const [id, entry] of this.sessions) {
       if (entry.alive) {
-        result.push({ id, openedAt: entry.openedAt });
+        result.push({ id, openedAt: entry.openedAt, lastDataAt: entry.lastDataAt || 0 });
       }
     }
     return result;
+  }
+
+  /**
+   * Returns sessions that received pty output within the last `thresholdMs`.
+   * These are likely still processing AI work.
+   */
+  getBusySessions(thresholdMs = 5000) {
+    const now = Date.now();
+    const result = [];
+    for (const [id, entry] of this.sessions) {
+      if (entry.alive && entry.lastDataAt && (now - entry.lastDataAt) < thresholdMs) {
+        result.push(id);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Kill sessions that haven't produced output within `thresholdMs`.
+   * Returns the IDs of sessions that were killed.
+   */
+  killIdle(thresholdMs = 5000) {
+    const now = Date.now();
+    const killed = [];
+    for (const [id, entry] of this.sessions) {
+      if (entry.alive && (!entry.lastDataAt || (now - entry.lastDataAt) >= thresholdMs)) {
+        try { entry.pty.kill(); } catch {}
+        entry.alive = false;
+        this.sessions.delete(id);
+        killed.push(id);
+      }
+    }
+    return killed;
   }
 
   updateSettings(settings) {

@@ -1,9 +1,11 @@
 const { Terminal } = require('@xterm/xterm');
 const { FitAddon } = require('@xterm/addon-fit');
 const { WebLinksAddon } = require('@xterm/addon-web-links');
+const { deriveSessionState } = require('./session-state');
 
 // State
 const terminals = new Map();
+const sessionBusyState = new Map(); // sessionId → boolean (has recent pty output)
 let activeSessionId = null;
 let allSessions = [];
 let searchQuery = '';
@@ -341,9 +343,63 @@ async function refreshSessionList() {
       updateTabTitle(session.id, session.title);
     }
   }
+  await updateSessionBusyStates();
   renderSessionList();
   if (!activeSessionId) renderDashboard();
 }
+
+const BUSY_THRESHOLD_MS = 5000;
+const STATUS_POLL_MS = 3000;
+
+async function updateSessionBusyStates() {
+  try {
+    const activeSessions = await window.api.getActiveSessions();
+    const now = Date.now();
+    const newBusy = new Map();
+    for (const s of activeSessions) {
+      newBusy.set(s.id, s.lastDataAt && (now - s.lastDataAt) < BUSY_THRESHOLD_MS);
+    }
+    // Clear stale entries
+    for (const id of sessionBusyState.keys()) {
+      if (!newBusy.has(id)) sessionBusyState.delete(id);
+    }
+    for (const [id, busy] of newBusy) {
+      sessionBusyState.set(id, busy);
+    }
+  } catch {}
+}
+
+function patchSessionStateBadges() {
+  const activeIds = new Set([...terminals.keys()]);
+  document.querySelectorAll('.session-item[data-session-id]').forEach(el => {
+    const sessionId = el.dataset.sessionId;
+    const session = allSessions.find(s => s.id === sessionId);
+    if (!session) return;
+
+    const isRunning = activeIds.has(sessionId);
+    const hasPR = session.resources && session.resources.some(r => r.type === 'pr');
+    const { label, cls } = deriveSessionState({
+      isRunning,
+      isActive: sessionId === activeSessionId,
+      hasPR,
+      isHistory: currentSidebarTab === 'history',
+      isBusy: sessionBusyState.get(sessionId) || false
+    });
+
+    const badge = el.querySelector('.session-state');
+    if (badge && (badge.textContent !== label || !badge.classList.contains(cls))) {
+      badge.className = 'session-state ' + cls;
+      badge.textContent = label;
+    }
+  });
+}
+
+async function pollSessionStatus() {
+  await updateSessionBusyStates();
+  patchSessionStateBadges();
+}
+
+setInterval(pollSessionStatus, STATUS_POLL_MS);
 function renderSessionList() {
   const activeIds = new Set([...terminals.keys()]);
 
@@ -399,6 +455,7 @@ function renderSessionList() {
 
     const el = document.createElement('div');
     el.className = 'session-item';
+    el.dataset.sessionId = session.id;
     if (session.id === activeSessionId) el.classList.add('active');
     if (activeIds.has(session.id)) el.classList.add('running');
 
@@ -428,18 +485,13 @@ function renderSessionList() {
     // Derive session state
     const isRunning = activeIds.has(session.id);
     const hasPR = session.resources && session.resources.some(r => r.type === 'pr');
-    let stateLabel, stateCls;
-    if (hasPR && !isRunning) {
-      stateLabel = 'Pending'; stateCls = 'state-pending';
-    } else if (isRunning && session.id === activeSessionId) {
-      stateLabel = 'Working'; stateCls = 'state-working';
-    } else if (isRunning) {
-      stateLabel = 'Waiting'; stateCls = 'state-waiting';
-    } else if (currentSidebarTab === 'history') {
-      stateLabel = '✓ Done'; stateCls = 'state-done';
-    } else {
-      stateLabel = 'Idle'; stateCls = 'state-idle';
-    }
+    const { label: stateLabel, cls: stateCls } = deriveSessionState({
+      isRunning,
+      isActive: session.id === activeSessionId,
+      hasPR,
+      isHistory: currentSidebarTab === 'history',
+      isBusy: sessionBusyState.get(session.id) || false
+    });
 
     el.innerHTML = `
       <div class="session-header-row">
@@ -567,6 +619,8 @@ function confirmDeleteSession(sessionId, title) {
 async function openSession(sessionId) {
   if (terminals.has(sessionId)) {
     switchToSession(sessionId);
+    // Wait for rAF focus to complete
+    await new Promise(resolve => requestAnimationFrame(resolve));
     return;
   }
   if (openingSession.has(sessionId)) return;
@@ -581,6 +635,8 @@ async function openSession(sessionId) {
     addTab(sessionId, session?.title || sessionId.substring(0, 8));
     renderSessionList();
     saveTabState();
+    // Wait for rAF focus to complete
+    await new Promise(resolve => requestAnimationFrame(resolve));
   } finally {
     openingSession.delete(sessionId);
   }
