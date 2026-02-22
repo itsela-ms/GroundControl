@@ -555,7 +555,10 @@ function renderSessionList() {
 
   let displayed;
   if (currentSidebarTab === 'active') {
-    displayed = allSessions.filter(s => activeIds.has(s.id));
+    displayed = allSessions.filter(s =>
+      activeIds.has(s.id) ||
+      (s.resources && s.resources.some(r => r.type === 'pr') && !sessionAliveState.has(s.id))
+    );
     displayed.sort((a, b) => (sessionLastUsed.get(b.id) || 0) - (sessionLastUsed.get(a.id) || 0));
   } else {
     displayed = allSessions;

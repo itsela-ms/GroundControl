@@ -36,36 +36,35 @@ describe('PtyManager', () => {
   });
 
   describe('lastDataAt tracking', () => {
-    it('initializes lastDataAt on openSession', () => {
-      const now = Date.now();
+    it('initializes lastDataAt as null on openSession', () => {
       const id = manager.openSession('test-1');
       const entry = manager.sessions.get(id);
-      expect(entry.lastDataAt).toBeGreaterThanOrEqual(now);
+      expect(entry.lastDataAt).toBeNull();
     });
 
-    it('initializes lastDataAt on newSession', () => {
-      const now = Date.now();
+    it('initializes lastDataAt as null on newSession', () => {
       const id = manager.newSession();
       const entry = manager.sessions.get(id);
-      expect(entry.lastDataAt).toBeGreaterThanOrEqual(now);
+      expect(entry.lastDataAt).toBeNull();
     });
 
     it('updates lastDataAt when pty emits data', () => {
       const id = manager.openSession('test-2');
       const entry = manager.sessions.get(id);
-      const initial = entry.lastDataAt;
+      expect(entry.lastDataAt).toBeNull();
 
       vi.advanceTimersByTime(1000);
       getPty(manager, id)._emitData('hello');
 
-      expect(entry.lastDataAt).toBeGreaterThan(initial);
+      expect(entry.lastDataAt).toBeGreaterThan(0);
     });
   });
 
   describe('getBusySessions', () => {
     it('returns sessions with recent output', () => {
       const id = manager.openSession('busy-1');
-      // lastDataAt was just set to Date.now()
+      // Simulate actual output
+      getPty(manager, id)._emitData('output');
       const busy = manager.getBusySessions(5000);
       expect(busy).toContain('busy-1');
     });
@@ -90,8 +89,15 @@ describe('PtyManager', () => {
       expect(manager.getBusySessions(5000)).toEqual([]);
     });
 
+    it('excludes sessions with no output yet', () => {
+      manager.openSession('fresh-no-output');
+      const busy = manager.getBusySessions(5000);
+      expect(busy).not.toContain('fresh-no-output');
+    });
+
     it('uses threshold correctly', () => {
-      manager.openSession('threshold-1');
+      const id = manager.openSession('threshold-1');
+      getPty(manager, id)._emitData('output');
       vi.advanceTimersByTime(3000);
 
       expect(manager.getBusySessions(5000)).toContain('threshold-1');
@@ -111,7 +117,7 @@ describe('PtyManager', () => {
 
     it('keeps sessions with recent output', () => {
       const id = manager.openSession('fresh-1');
-      // lastDataAt is current
+      getPty(manager, id)._emitData('output');
 
       const killed = manager.killIdle(5000);
       expect(killed).not.toContain('fresh-1');
@@ -128,9 +134,11 @@ describe('PtyManager', () => {
     });
 
     it('handles mixed busy and idle sessions', () => {
-      manager.openSession('old-1');
+      const oldId = manager.openSession('old-1');
+      getPty(manager, oldId)._emitData('output');
       vi.advanceTimersByTime(6000);
-      manager.openSession('new-1');
+      const newId = manager.openSession('new-1');
+      getPty(manager, newId)._emitData('output');
 
       const killed = manager.killIdle(5000);
       expect(killed).toContain('old-1');
