@@ -261,6 +261,11 @@ app.whenReady().then(async () => {
 
   // Auto-notify on session exit
   ptyManager.on('exit', (sessionId, exitCode) => {
+    // Flush any remaining buffered data before signalling exit
+    if (ptyDataBuffers.has(sessionId) && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('pty:data', { sessionId, data: ptyDataBuffers.get(sessionId).join('') });
+      ptyDataBuffers.delete(sessionId);
+    }
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('pty:exit', { sessionId, exitCode });
     }

@@ -4,48 +4,48 @@ const { deriveSessionState } = require('../src/session-state');
 describe('deriveSessionState', () => {
   it('returns Idle when nothing is active', () => {
     const result = deriveSessionState({ isRunning: false, isActive: false, hasPR: false, isHistory: false, isBusy: false });
-    expect(result).toEqual({ label: 'Idle', cls: 'state-idle' });
+    expect(result).toEqual({ label: 'Idle', cls: 'state-idle', tip: 'No active terminal' });
   });
 
   it('returns Working when running and busy', () => {
     const result = deriveSessionState({ isRunning: true, isActive: true, hasPR: false, isHistory: false, isBusy: true });
-    expect(result).toEqual({ label: 'Working', cls: 'state-working' });
+    expect(result).toEqual({ label: 'Working', cls: 'state-working', tip: 'AI is actively producing output' });
   });
 
   it('returns Waiting when running but not busy', () => {
     const result = deriveSessionState({ isRunning: true, isActive: true, hasPR: false, isHistory: false, isBusy: false });
-    expect(result).toEqual({ label: 'Waiting', cls: 'state-waiting' });
+    expect(result).toEqual({ label: 'Waiting', cls: 'state-waiting', tip: 'Session is open but idle \u2014 no recent output' });
   });
 
   it('returns Waiting when running and active but not busy', () => {
     const result = deriveSessionState({ isRunning: true, isActive: false, hasPR: false, isHistory: false, isBusy: false });
-    expect(result).toEqual({ label: 'Waiting', cls: 'state-waiting' });
+    expect(result).toEqual({ label: 'Waiting', cls: 'state-waiting', tip: 'Session is open but idle \u2014 no recent output' });
   });
 
   it('returns Pending when has PR and not running', () => {
     const result = deriveSessionState({ isRunning: false, isActive: false, hasPR: true, isHistory: false, isBusy: false });
-    expect(result).toEqual({ label: 'Pending', cls: 'state-pending' });
+    expect(result).toEqual({ label: 'Pending', cls: 'state-pending', tip: 'Has a PR linked \u2014 waiting to be picked up' });
   });
 
   it('returns Done when in history tab', () => {
     const result = deriveSessionState({ isRunning: false, isActive: false, hasPR: false, isHistory: true, isBusy: false });
-    expect(result).toEqual({ label: '\u2713 Done', cls: 'state-done' });
+    expect(result).toEqual({ label: '\u2713 Done', cls: 'state-done', tip: 'Session completed' });
   });
 
   // Priority tests
   it('Pending takes priority over Done (PR + history)', () => {
     const result = deriveSessionState({ isRunning: false, isActive: false, hasPR: true, isHistory: true, isBusy: false });
-    expect(result).toEqual({ label: 'Pending', cls: 'state-pending' });
+    expect(result).toEqual({ label: 'Pending', cls: 'state-pending', tip: 'Has a PR linked \u2014 waiting to be picked up' });
   });
 
   it('Working takes priority over Pending (running + busy + PR)', () => {
     const result = deriveSessionState({ isRunning: true, isActive: true, hasPR: true, isHistory: false, isBusy: true });
-    expect(result).toEqual({ label: 'Working', cls: 'state-working' });
+    expect(result).toEqual({ label: 'Working', cls: 'state-working', tip: 'AI is actively producing output' });
   });
 
   it('Waiting when running with PR but not busy', () => {
     const result = deriveSessionState({ isRunning: true, isActive: false, hasPR: true, isHistory: false, isBusy: false });
-    expect(result).toEqual({ label: 'Waiting', cls: 'state-waiting' });
+    expect(result).toEqual({ label: 'Waiting', cls: 'state-waiting', tip: 'Session is open but idle \u2014 no recent output' });
   });
 
   it('Done takes priority over Idle in history tab', () => {

@@ -11,11 +11,11 @@
  * @returns {{ label: string, cls: string }}
  */
 function deriveSessionState({ isRunning, isActive, hasPR, isHistory, isBusy }) {
-  if (hasPR && !isRunning) return { label: 'Pending', cls: 'state-pending' };
-  if (isRunning && isBusy)  return { label: 'Working', cls: 'state-working' };
-  if (isRunning)            return { label: 'Waiting', cls: 'state-waiting' };
-  if (isHistory)            return { label: '\u2713 Done', cls: 'state-done' };
-  return { label: 'Idle', cls: 'state-idle' };
+  if (hasPR && !isRunning) return { label: 'Pending', cls: 'state-pending', tip: 'Has a PR linked — waiting to be picked up' };
+  if (isRunning && isBusy)  return { label: 'Working', cls: 'state-working', tip: 'AI is actively producing output' };
+  if (isRunning)            return { label: 'Waiting', cls: 'state-waiting', tip: 'Session is open but idle — no recent output' };
+  if (isHistory)            return { label: '\u2713 Done', cls: 'state-done', tip: 'Session completed' };
+  return { label: 'Idle', cls: 'state-idle', tip: 'No active terminal' };
 }
 
 module.exports = { deriveSessionState };

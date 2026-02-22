@@ -64,6 +64,7 @@ class PtyManager extends EventEmitter {
       if (entry && entry.alive) {
         entry.alive = false;
         this.emit('exit', sessionId, exitCode);
+        this.sessions.delete(sessionId);
       }
     });
 
@@ -108,6 +109,7 @@ class PtyManager extends EventEmitter {
       if (entry && entry.alive) {
         entry.alive = false;
         this.emit('exit', sessionId, exitCode);
+        this.sessions.delete(sessionId);
       }
     });
 

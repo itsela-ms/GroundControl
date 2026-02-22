@@ -410,47 +410,41 @@ body.platform-mac #titlebar {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 3px;
-  background: rgba(137, 180, 250, 0.1);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--text-dim) 10%, transparent);
+  color: var(--text-dim);
   white-space: nowrap;
 }
 
-.tag.repo {
-  background: rgba(166, 227, 161, 0.1);
-  color: var(--green);
+.tag.tag-repo {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text-dim) 12%, transparent);
 }
 
-.tag.tool {
-  background: rgba(249, 226, 175, 0.1);
-  color: var(--yellow);
-}
-
-/* Resource badges */
-.session-resources {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
-  padding-right: 8px;
-}
-
-.resource-badge {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 3px;
-  white-space: nowrap;
-  cursor: default;
+.tag.tag-pr,
+.tag.tag-wi {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text-dim) 14%, transparent);
   font-family: 'Cascadia Code', 'Consolas', monospace;
 }
 
-.resource-badge.pr {
-  background: color-mix(in srgb, var(--mauve) 15%, transparent);
-  color: var(--mauve);
+.tag-overflow {
+  cursor: default;
+  color: var(--text-dimmer);
+  background: transparent;
+  padding: 1px 4px;
 }
 
-.resource-badge.wi {
-  background: color-mix(in srgb, var(--teal) 15%, transparent);
-  color: var(--teal);
+.tags-hidden {
+  display: none;
+  gap: 3px;
+}
+
+.session-item:hover .tags-hidden {
+  display: contents;
+}
+
+.session-item:hover .tag-overflow {
+  display: none;
 }
 
 /* Empty list state */

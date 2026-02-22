@@ -6,6 +6,7 @@ const { deriveSessionState } = require('./session-state');
 // State
 const terminals = new Map();
 const sessionBusyState = new Map(); // sessionId → boolean (has recent pty output)
+const sessionAliveState = new Set(); // sessionIds with live pty processes
 let activeSessionId = null;
 let allSessions = [];
 let searchQuery = '';
@@ -16,6 +17,7 @@ let currentTheme = 'mocha';
 const openingSession = new Set();
 const sessionLastUsed = new Map();
 let creatingSession = false;
+const ipcCleanups = []; // unsubscribe fns for IPC listeners
 
 function saveTabState() {
   const openTabs = [...terminals.keys()];
@@ -69,6 +71,55 @@ const toastContainer = document.getElementById('toast-container');
 
 const NOTIF_ICONS = { 'task-done': '✓', 'needs-input': '◌', 'error': '!', 'info': '·' };
 
+// Delegated event handling for session list items (avoids per-item listener churn)
+let _titleClickTimeout = null;
+let _titleClickSessionId = null;
+sessionList.addEventListener('click', (e) => {
+  const deleteBtn = e.target.closest('.session-delete');
+  if (deleteBtn) {
+    e.stopPropagation();
+    const item = deleteBtn.closest('.session-item');
+    if (item) {
+      const session = allSessions.find(s => s.id === item.dataset.sessionId);
+      if (session) confirmDeleteSession(session.id, session.title);
+    }
+    return;
+  }
+  const titleEl = e.target.closest('.session-title');
+  if (titleEl) {
+    e.stopPropagation();
+    const item = titleEl.closest('.session-item');
+    const sid = item?.dataset.sessionId;
+    if (!sid) return;
+    if (_titleClickTimeout && _titleClickSessionId === sid) {
+      clearTimeout(_titleClickTimeout);
+      _titleClickTimeout = null;
+      _titleClickSessionId = null;
+      return; // dblclick handler will fire
+    }
+    // Clear any pending timeout for a different session
+    if (_titleClickTimeout) clearTimeout(_titleClickTimeout);
+    _titleClickSessionId = sid;
+    _titleClickTimeout = setTimeout(() => { _titleClickTimeout = null; _titleClickSessionId = null; openSession(sid); }, 250);
+    return;
+  }
+  const item = e.target.closest('.session-item');
+  if (item) openSession(item.dataset.sessionId);
+});
+sessionList.addEventListener('dblclick', (e) => {
+  const titleEl = e.target.closest('.session-title');
+  if (!titleEl) return;
+  e.stopPropagation();
+  if (_titleClickTimeout) { clearTimeout(_titleClickTimeout); _titleClickTimeout = null; _titleClickSessionId = null; }
+  const item = titleEl.closest('.session-item');
+  if (item) startRenameSession(item.dataset.sessionId, titleEl);
+});
+sessionList.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const item = e.target.closest('.session-item');
+  if (item) openSession(item.dataset.sessionId);
+});
+
 // Initialize
 async function init() {
   // Platform detection — add CSS class + update tooltip labels
@@ -96,23 +147,57 @@ async function init() {
 
   await refreshSessionList();
 
-  window.api.onPtyData((sessionId, data) => {
+  // Clean up any previous IPC listeners (guards against double-init on reload)
+  while (ipcCleanups.length) ipcCleanups.pop()();
+
+  ipcCleanups.push(window.api.onPtyData((sessionId, data) => {
     const entry = terminals.get(sessionId);
     if (entry) entry.terminal.write(data);
-  });
+    sessionAliveState.add(sessionId);
+    sessionBusyState.set(sessionId, true);
+    patchSessionStateBadges();
+  }));
 
-  window.api.onPtyExit((sessionId, exitCode) => {
+  ipcCleanups.push(window.api.onPtyExit((sessionId, exitCode) => {
     const entry = terminals.get(sessionId);
     if (entry) {
+      entry.exited = true;
       entry.terminal.write(`\r\n\x1b[90m[Session ended with code ${exitCode}]\x1b[0m\r\n`);
+      // Dispose terminal after a short delay so the exit message is visible
+      entry.exitTimeout = setTimeout(() => {
+        const e = terminals.get(sessionId);
+        if (e && e.exited) {
+          if (e.titlePoll) clearInterval(e.titlePoll);
+          e.terminal.dispose();
+          e.wrapper.remove();
+          terminals.delete(sessionId);
+          const tab = document.querySelector(`.tab[data-session-id="${sessionId}"]`);
+          if (tab) tab.remove();
+          if (activeSessionId === sessionId) {
+            activeSessionId = null;
+            const remaining = document.querySelectorAll('.tab');
+            if (remaining.length > 0) switchToSession(remaining[remaining.length - 1].dataset.sessionId);
+            else { emptyState.classList.remove('hidden'); updateResourcePanel(null); }
+          }
+          saveTabState();
+          scheduleRenderSessionList();
+        }
+      }, 3000);
     }
+    sessionAliveState.delete(sessionId);
+    sessionBusyState.delete(sessionId);
+    sessionIdleCount.delete(sessionId);
     updateTabStatus(sessionId, false);
-    setTimeout(() => refreshSessionList(), 1000);
-  });
+    patchSessionStateBadges();
+  }));
 
-  window.api.onPtyEvicted?.((sessionId) => {
+  const evictedUnsub = window.api.onPtyEvicted?.((sessionId) => {
+    sessionAliveState.delete(sessionId);
+    sessionBusyState.delete(sessionId);
+    sessionIdleCount.delete(sessionId);
     const entry = terminals.get(sessionId);
     if (entry) {
+      if (entry.titlePoll) clearInterval(entry.titlePoll);
       entry.terminal.write('\r\n\x1b[90m[Session evicted to free capacity]\x1b[0m\r\n');
       entry.terminal.dispose();
       entry.wrapper.remove();
@@ -129,6 +214,7 @@ async function init() {
     renderSessionList();
     saveTabState();
   });
+  if (evictedUnsub) ipcCleanups.push(evictedUnsub);
 
   let resizeTimer = null;
   const resizeObserver = new ResizeObserver(() => {
@@ -167,7 +253,7 @@ async function init() {
 
   // Update button
   document.getElementById('btn-check-update').addEventListener('click', () => window.api.checkForUpdates());
-  window.api.onUpdateStatus(handleUpdateStatus);
+  ipcCleanups.push(window.api.onUpdateStatus(handleUpdateStatus));
 
   // Theme switcher
   settingsOverlay.querySelectorAll('.theme-option').forEach(btn => {
@@ -207,16 +293,16 @@ async function init() {
     }
   });
 
-  window.api.onNotification((notification) => {
+  ipcCleanups.push(window.api.onNotification((notification) => {
     showToast(notification);
     refreshNotifications();
-  });
+  }));
 
-  window.api.onNotificationClick(async (notification) => {
+  ipcCleanups.push(window.api.onNotificationClick(async (notification) => {
     if (notification.sessionId) {
       await openSession(notification.sessionId);
     }
-  });
+  }));
 
   await refreshNotifications();
 
@@ -348,47 +434,74 @@ function closeSettings() {
 
 async function refreshSessionList() {
   allSessions = await window.api.listSessions();
+  const validIds = new Set([...allSessions.map(s => s.id), ...terminals.keys()]);
   for (const session of allSessions) {
     if (terminals.has(session.id)) {
       updateTabTitle(session.id, session.title);
     }
   }
+  // Prune stale entries from tracking maps
+  for (const id of sessionLastUsed.keys()) {
+    if (!validIds.has(id)) sessionLastUsed.delete(id);
+  }
   await updateSessionBusyStates();
-  renderSessionList();
+  scheduleRenderSessionList();
   if (!activeSessionId) emptyState.classList.remove('hidden');
 }
 
-const BUSY_THRESHOLD_MS = 5000;
+const BUSY_THRESHOLD_MS = 30000;
 const STATUS_POLL_MS = 3000;
+// Consecutive idle polls required before transitioning Working → Waiting.
+// Prevents flickering when AI pauses briefly between output bursts.
+const IDLE_GRACE_POLLS = 3;
+const sessionIdleCount = new Map();
 
 async function updateSessionBusyStates() {
   try {
     const activeSessions = await window.api.getActiveSessions();
     const now = Date.now();
-    const newBusy = new Map();
+    const newAlive = new Set();
     for (const s of activeSessions) {
-      newBusy.set(s.id, s.lastDataAt && (now - s.lastDataAt) < BUSY_THRESHOLD_MS);
+      newAlive.add(s.id);
+      const recentOutput = s.lastDataAt && (now - s.lastDataAt) < BUSY_THRESHOLD_MS;
+      if (recentOutput) {
+        // Active output — immediately mark as busy, reset idle counter
+        sessionBusyState.set(s.id, true);
+        sessionIdleCount.delete(s.id);
+      } else if (sessionBusyState.get(s.id)) {
+        // Was busy, now idle — require sustained idle before flipping
+        const count = (sessionIdleCount.get(s.id) || 0) + 1;
+        sessionIdleCount.set(s.id, count);
+        if (count >= IDLE_GRACE_POLLS) {
+          sessionBusyState.set(s.id, false);
+          sessionIdleCount.delete(s.id);
+        }
+      } else {
+        sessionBusyState.set(s.id, false);
+      }
     }
+    // Sync alive state from main process
+    sessionAliveState.clear();
+    for (const id of newAlive) sessionAliveState.add(id);
     // Clear stale entries
     for (const id of sessionBusyState.keys()) {
-      if (!newBusy.has(id)) sessionBusyState.delete(id);
-    }
-    for (const [id, busy] of newBusy) {
-      sessionBusyState.set(id, busy);
+      if (!newAlive.has(id)) {
+        sessionBusyState.delete(id);
+        sessionIdleCount.delete(id);
+      }
     }
   } catch {}
 }
 
 function patchSessionStateBadges() {
-  const activeIds = new Set([...terminals.keys()]);
   document.querySelectorAll('.session-item[data-session-id]').forEach(el => {
     const sessionId = el.dataset.sessionId;
     const session = allSessions.find(s => s.id === sessionId);
     if (!session) return;
 
-    const isRunning = activeIds.has(sessionId);
+    const isRunning = sessionAliveState.has(sessionId);
     const hasPR = session.resources && session.resources.some(r => r.type === 'pr');
-    const { label, cls } = deriveSessionState({
+    const { label, cls, tip } = deriveSessionState({
       isRunning,
       isActive: sessionId === activeSessionId,
       hasPR,
@@ -400,6 +513,7 @@ function patchSessionStateBadges() {
     if (badge && (badge.textContent !== label || !badge.classList.contains(cls))) {
       badge.className = 'session-state ' + cls;
       badge.textContent = label;
+      badge.title = tip;
     }
   });
 }
@@ -410,6 +524,17 @@ async function pollSessionStatus() {
 }
 
 setInterval(pollSessionStatus, STATUS_POLL_MS);
+
+let _renderScheduled = false;
+function scheduleRenderSessionList() {
+  if (_renderScheduled) return;
+  _renderScheduled = true;
+  requestAnimationFrame(() => {
+    _renderScheduled = false;
+    renderSessionList();
+  });
+}
+
 function renderSessionList() {
   const activeIds = new Set([...terminals.keys()]);
 
@@ -467,35 +592,44 @@ function renderSessionList() {
     el.className = 'session-item';
     el.dataset.sessionId = session.id;
     if (session.id === activeSessionId) el.classList.add('active');
-    if (activeIds.has(session.id)) el.classList.add('running');
+    if (sessionAliveState.has(session.id)) el.classList.add('running');
 
     const lastUsedTime = sessionLastUsed.get(session.id);
     const timeStr = new Date(lastUsedTime || session.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     let tagsHtml = '';
-    if (session.tags && session.tags.length > 0) {
-      const visibleTags = session.tags.slice(0, 4);
-      tagsHtml = '<div class="session-tags">' + visibleTags.map(t => {
-        const cls = t.startsWith('repo:') ? 'tag repo' : t.startsWith('tool:') ? 'tag tool' : 'tag';
-        const label = t.replace(/^(repo|tool):/, '');
-        return `<span class="${cls}">${escapeHtml(label)}</span>`;
-      }).join('') + (session.tags.length > 4 ? `<span class="tag">+${session.tags.length - 4}</span>` : '') + '</div>';
-    }
-
-    let resourcesHtml = '';
+    // Merge resources + tags into one prioritized list
+    const allPills = [];
     if (session.resources && session.resources.length > 0) {
       const prs = session.resources.filter(r => r.type === 'pr');
       const wis = session.resources.filter(r => r.type === 'workitem');
-      const badges = [];
-      if (prs.length > 0) badges.push(`<span class="resource-badge pr" title="${escapeHtml(prs.map(p => 'PR ' + p.id + (p.repo ? ' (' + p.repo + ')' : '')).join('\n'))}">PR ${prs.map(p => p.id).join(', ')}</span>`);
-      if (wis.length > 0) badges.push(`<span class="resource-badge wi" title="${escapeHtml(wis.map(w => 'WI ' + w.id).join('\n'))}">WI ${wis.map(w => w.id).join(', ')}</span>`);
-      if (badges.length > 0) resourcesHtml = '<div class="session-resources">' + badges.join('') + '</div>';
+      if (prs.length > 0) allPills.push(`<span class="tag tag-pr" title="${escapeHtml(prs.map(p => 'PR ' + p.id + (p.repo ? ' (' + p.repo + ')' : '')).join('\n'))}">PR ${prs.map(p => p.id).join(', ')}</span>`);
+      if (wis.length > 0) allPills.push(`<span class="tag tag-wi" title="${escapeHtml(wis.map(w => 'WI ' + w.id).join('\n'))}">WI ${wis.map(w => w.id).join(', ')}</span>`);
+    }
+    if (session.tags && session.tags.length > 0) {
+      // Repos first, then everything else
+      const repos = session.tags.filter(t => t.startsWith('repo:'));
+      const rest = session.tags.filter(t => !t.startsWith('repo:'));
+      for (const t of [...repos, ...rest]) {
+        const cls = t.startsWith('repo:') ? 'tag tag-repo' : 'tag';
+        const label = t.replace(/^(repo|tool):/, '');
+        allPills.push(`<span class="${cls}">${escapeHtml(label)}</span>`);
+      }
+    }
+    if (allPills.length > 0) {
+      const MAX_VISIBLE = 3;
+      const visible = allPills.slice(0, MAX_VISIBLE).join('');
+      const hiddenCount = allPills.length - MAX_VISIBLE;
+      const hidden = hiddenCount > 0
+        ? `<span class="tag tag-overflow">+${hiddenCount}</span><span class="tags-hidden">${allPills.slice(MAX_VISIBLE).join('')}</span>`
+        : '';
+      tagsHtml = `<div class="session-tags">${visible}${hidden}</div>`;
     }
 
     // Derive session state
-    const isRunning = activeIds.has(session.id);
+    const isRunning = sessionAliveState.has(session.id);
     const hasPR = session.resources && session.resources.some(r => r.type === 'pr');
-    const { label: stateLabel, cls: stateCls } = deriveSessionState({
+    const { label: stateLabel, cls: stateCls, tip: stateTip } = deriveSessionState({
       isRunning,
       isActive: session.id === activeSessionId,
       hasPR,
@@ -506,41 +640,15 @@ function renderSessionList() {
     el.innerHTML = `
       <div class="session-header-row">
         <div class="session-title" data-title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</div>
-        <span class="session-state ${stateCls}">${stateLabel}</span>
+        <span class="session-state ${stateCls}" title="${escapeHtml(stateTip)}">${stateLabel}</span>
       </div>
       <div class="session-meta"><span>${timeStr}</span></div>
       ${tagsHtml}
-      ${resourcesHtml}
       ${currentSidebarTab === 'history' ? '<button class="session-delete" title="Delete session">✕</button>' : ''}
     `;
 
     el.setAttribute('tabindex', '0');
     el.setAttribute('role', 'button');
-    el.addEventListener('keydown', (e) => { if (e.key === 'Enter') openSession(session.id); });
-    el.addEventListener('click', () => openSession(session.id));
-
-    // Delete button (history tab only)
-    const deleteBtn = el.querySelector('.session-delete');
-    if (deleteBtn) {
-      deleteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        confirmDeleteSession(session.id, session.title);
-      });
-    }
-
-    // Double-click title to rename (with delayed click to avoid race)
-    const titleEl = el.querySelector('.session-title');
-    let titleClickTimeout = null;
-    titleEl.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (titleClickTimeout) { clearTimeout(titleClickTimeout); titleClickTimeout = null; return; }
-      titleClickTimeout = setTimeout(() => { titleClickTimeout = null; openSession(session.id); }, 250);
-    });
-    titleEl.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      if (titleClickTimeout) { clearTimeout(titleClickTimeout); titleClickTimeout = null; }
-      startRenameSession(session.id, titleEl);
-    });
 
     sessionList.appendChild(el);
   }
@@ -627,17 +735,28 @@ function confirmDeleteSession(sessionId, title) {
 }
 
 async function openSession(sessionId) {
-  if (terminals.has(sessionId)) {
+  const existing = terminals.get(sessionId);
+  if (existing && !existing.exited) {
     switchToSession(sessionId);
-    // Wait for rAF focus to complete
     await new Promise(resolve => requestAnimationFrame(resolve));
     return;
+  }
+  // Clean up dead terminal from exit delay if present
+  if (existing && existing.exited) {
+    if (existing.exitTimeout) clearTimeout(existing.exitTimeout);
+    if (existing.titlePoll) clearInterval(existing.titlePoll);
+    existing.terminal.dispose();
+    existing.wrapper.remove();
+    terminals.delete(sessionId);
+    const tab = document.querySelector(`.tab[data-session-id="${sessionId}"]`);
+    if (tab) tab.remove();
   }
   if (openingSession.has(sessionId)) return;
   openingSession.add(sessionId);
 
   try {
     await window.api.openSession(sessionId);
+    sessionAliveState.add(sessionId);
     createTerminal(sessionId);
     switchToSession(sessionId);
 
@@ -658,6 +777,7 @@ async function newSession() {
 
   try {
     const sessionId = await window.api.newSession();
+    sessionAliveState.add(sessionId);
     createTerminal(sessionId);
     switchToSession(sessionId);
     addTab(sessionId, 'New Session');
@@ -684,6 +804,9 @@ async function newSession() {
       if (session && session.title !== 'New Session') { clearInterval(titlePoll); return; }
       refreshSessionList();
     }, 15000);
+    // Store on terminal entry so it can be cleared on close/exit/eviction
+    const termEntry = terminals.get(sessionId);
+    if (termEntry) termEntry.titlePoll = titlePoll;
     saveTabState();
   } finally {
     creatingSession = false;
@@ -785,8 +908,16 @@ function switchToSession(sessionId) {
   });
 
   updateResourcePanel(sessionId);
-  renderSessionList();
+  patchActiveHighlight();
+  patchSessionStateBadges();
   saveTabState();
+}
+
+// Lightweight: just toggles .active class on session items without rebuilding DOM
+function patchActiveHighlight() {
+  document.querySelectorAll('.session-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.sessionId === activeSessionId);
+  });
 }
 
 function showHome() {
@@ -847,10 +978,16 @@ async function closeTab(sessionId) {
 
   const entry = terminals.get(sessionId);
   if (entry) {
+    if (entry.exitTimeout) clearTimeout(entry.exitTimeout);
+    if (entry.titlePoll) clearInterval(entry.titlePoll);
     entry.terminal.dispose();
     entry.wrapper.remove();
     terminals.delete(sessionId);
   }
+  sessionAliveState.delete(sessionId);
+  sessionBusyState.delete(sessionId);
+  sessionIdleCount.delete(sessionId);
+  sessionLastUsed.delete(sessionId);
 
   const tab = document.querySelector(`.tab[data-session-id="${sessionId}"]`);
   if (tab) tab.remove();

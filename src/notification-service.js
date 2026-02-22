@@ -3,6 +3,7 @@ const path = require('path');
 const EventEmitter = require('events');
 
 const MAX_NOTIFICATIONS = 500;
+const MAX_PROCESSED_FILES = 1000;
 
 class NotificationService extends EventEmitter {
   constructor(notificationsDir) {
@@ -82,6 +83,15 @@ class NotificationService extends EventEmitter {
       this._saveState();
 
       this.processedFiles.add(filename);
+
+      // Cap processed files set to prevent unbounded growth
+      if (this.processedFiles.size > MAX_PROCESSED_FILES) {
+        const excess = this.processedFiles.size - MAX_PROCESSED_FILES;
+        const iter = this.processedFiles.values();
+        for (let i = 0; i < excess; i++) {
+          this.processedFiles.delete(iter.next().value);
+        }
+      }
 
       // Consume the file
       try { fs.unlinkSync(filePath); } catch {}
