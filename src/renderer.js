@@ -71,6 +71,14 @@ const NOTIF_ICONS = { 'task-done': '✓', 'needs-input': '◌', 'error': '!', 'i
 
 // Initialize
 async function init() {
+  // Platform detection — add CSS class + update tooltip labels
+  if (window.api.isMac) {
+    document.body.classList.add('platform-mac');
+    document.querySelectorAll('[title*="Ctrl+"]').forEach(el => {
+      el.title = el.title.replace(/Ctrl\+/g, '⌘');
+    });
+  }
+
   const settings = await window.api.getSettings();
   maxConcurrentInput.value = settings.maxConcurrent;
   if (settings.sidebarWidth) {
@@ -87,7 +95,6 @@ async function init() {
   }
 
   await refreshSessionList();
-  renderDashboard();
 
   window.api.onPtyData((sessionId, data) => {
     const entry = terminals.get(sessionId);
@@ -117,7 +124,7 @@ async function init() {
       activeSessionId = null;
       const remaining = document.querySelectorAll('.tab');
       if (remaining.length > 0) switchToSession(remaining[remaining.length - 1].dataset.sessionId);
-      else { emptyState.classList.remove('hidden'); updateResourcePanel(null); renderDashboard(); }
+      else { emptyState.classList.remove('hidden'); updateResourcePanel(null); }
     }
     renderSessionList();
     saveTabState();
@@ -152,6 +159,9 @@ async function init() {
 
   // Settings modal
   btnSettings.addEventListener('click', openSettings);
+
+  // Home link — deselect active session
+  document.getElementById('titlebar-home').addEventListener('click', showHome);
   settingsOverlay.querySelector('.settings-close').addEventListener('click', closeSettings);
   settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) closeSettings(); });
 
@@ -345,7 +355,7 @@ async function refreshSessionList() {
   }
   await updateSessionBusyStates();
   renderSessionList();
-  if (!activeSessionId) renderDashboard();
+  if (!activeSessionId) emptyState.classList.remove('hidden');
 }
 
 const BUSY_THRESHOLD_MS = 5000;
@@ -718,11 +728,12 @@ function createTerminal(sessionId) {
     }, true);
   }
 
-  // Intercept paste shortcuts — xterm eats Ctrl+V / Shift+Insert as raw control chars
+  // Intercept paste shortcuts — xterm eats Ctrl+V / Cmd+V / Shift+Insert as raw control chars
   // Also send CSI u sequence for Shift+Enter so the CLI can distinguish it from plain Enter
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
-    const isPaste = (e.ctrlKey && e.key === 'v') || (e.shiftKey && e.key === 'Insert');
+    const mod = e.ctrlKey || e.metaKey;
+    const isPaste = (mod && e.key === 'v') || (e.shiftKey && e.key === 'Insert');
     if (isPaste) {
       e.preventDefault();
       navigator.clipboard.readText().then(text => {
@@ -776,6 +787,16 @@ function switchToSession(sessionId) {
   updateResourcePanel(sessionId);
   renderSessionList();
   saveTabState();
+}
+
+function showHome() {
+  if (activeSessionId && terminals.has(activeSessionId)) {
+    terminals.get(activeSessionId).wrapper.classList.remove('visible');
+  }
+  activeSessionId = null;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  emptyState.classList.remove('hidden');
+  updateResourcePanel(null);
 }
 
 function addTab(sessionId, title) {
@@ -842,7 +863,6 @@ async function closeTab(sessionId) {
     } else {
       emptyState.classList.remove('hidden');
       updateResourcePanel(null);
-      renderDashboard();
     }
   }
 
@@ -1256,88 +1276,6 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-function renderDashboard() {
-  const grid = document.getElementById('dashboard-grid');
-  const dashEmpty = document.getElementById('dashboard-empty');
-  if (!grid || !dashEmpty) return;
-
-  const activeIds = new Set([...terminals.keys()]);
-
-  const sessions = [...allSessions].sort((a, b) => {
-    const aTime = sessionLastUsed.get(a.id) || new Date(a.updatedAt).getTime();
-    const bTime = sessionLastUsed.get(b.id) || new Date(b.updatedAt).getTime();
-    return bTime - aTime;
-  }).slice(0, 12);
-
-  grid.innerHTML = '';
-
-  if (sessions.length === 0) {
-    grid.style.display = 'none';
-    dashEmpty.style.display = 'flex';
-    return;
-  }
-
-  grid.style.display = 'grid';
-  dashEmpty.style.display = 'none';
-
-  for (const session of sessions) {
-    const isRunning = activeIds.has(session.id);
-    const hasPR = session.resources && session.resources.some(r => r.type === 'pr');
-    let stateLabel, stateCls;
-    if (hasPR && !isRunning) {
-      stateLabel = 'Pending'; stateCls = 'state-pending';
-    } else if (isRunning && session.id === activeSessionId) {
-      stateLabel = 'Working'; stateCls = 'state-working';
-    } else if (isRunning) {
-      stateLabel = 'Waiting'; stateCls = 'state-waiting';
-    } else {
-      stateLabel = 'Done'; stateCls = 'state-done';
-    }
-
-    const created = new Date(session.createdAt || session.updatedAt);
-    const now = new Date();
-    const diffMs = now - created;
-    const diffMins = Math.floor(diffMs / 60000);
-    let duration;
-    if (diffMins < 60) duration = `${diffMins}m`;
-    else if (diffMins < 1440) duration = `${Math.floor(diffMins / 60)}h ${diffMins % 60}m`;
-    else duration = `${Math.floor(diffMins / 1440)}d ${Math.floor((diffMins % 1440) / 60)}h`;
-
-    let tagsHtml = '';
-    if (session.tags && session.tags.length > 0) {
-      const visible = session.tags.slice(0, 3);
-      tagsHtml = '<div class="dashboard-card-tags">' + visible.map(t => {
-        const cls = t.startsWith('repo:') ? 'tag repo' : t.startsWith('tool:') ? 'tag tool' : 'tag';
-        const label = t.replace(/^(repo|tool):/, '');
-        return `<span class="${cls}">${escapeHtml(label)}</span>`;
-      }).join('') + '</div>';
-    }
-
-    let resourcesHtml = '';
-    if (session.resources && session.resources.length > 0) {
-      const prs = session.resources.filter(r => r.type === 'pr');
-      const wis = session.resources.filter(r => r.type === 'workitem');
-      const badges = [];
-      if (prs.length > 0) badges.push(`<span class="resource-badge pr">PR ${prs.map(p => p.id).join(', ')}</span>`);
-      if (wis.length > 0) badges.push(`<span class="resource-badge wi">WI ${wis.map(w => w.id).join(', ')}</span>`);
-      if (badges.length > 0) resourcesHtml = '<div class="dashboard-card-resources">' + badges.join('') + '</div>';
-    }
-
-    const card = document.createElement('div');
-    card.className = 'dashboard-card';
-    card.innerHTML = `
-      <div class="dashboard-card-header">
-        <div class="dashboard-card-title" title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</div>
-        <span class="dashboard-card-state ${stateCls}">${stateLabel}</span>
-      </div>
-      <div class="dashboard-card-duration">${duration}</div>
-      ${tagsHtml}
-      ${resourcesHtml}
-    `;
-    card.addEventListener('click', () => openSession(session.id));
-    grid.appendChild(card);
-  }
-}
 
 // Sidebar resize
 const resizeHandle = document.getElementById('resize-handle');
@@ -1503,13 +1441,15 @@ function showToast(notification) {
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
-  // CTRL+N: Create new session from anywhere
-  if (e.ctrlKey && e.key === 'n') { 
+  const mod = e.ctrlKey || e.metaKey;
+
+  // Ctrl/Cmd+N: Create new session from anywhere
+  if (mod && e.key === 'n') { 
     e.preventDefault(); 
     newSession(); 
   }
 
-  // CTRL+Tab: Switch between session tabs
+  // Ctrl/Cmd+Tab: Switch between session tabs
   if (e.ctrlKey && e.key === 'Tab') {
     e.preventDefault();
     const tabs = [...document.querySelectorAll('.tab')];
@@ -1519,8 +1459,8 @@ document.addEventListener('keydown', (e) => {
     switchToSession(tabs[next].dataset.sessionId);
   }
 
-  // CTRL+W: Close current session tab (only when terminal is focused)
-  if (e.ctrlKey && e.key === 'w') {
+  // Ctrl/Cmd+W: Close current session tab (only when terminal is focused)
+  if (mod && e.key === 'w') {
     e.preventDefault();
     // Only allow closing when a terminal is focused (not when in search or other inputs)
     if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
@@ -1529,8 +1469,8 @@ document.addEventListener('keydown', (e) => {
     if (focusedTerminal) closeTab(activeSessionId);
   }
 
-  // CTRL+F: Focus search bar
-  if (e.ctrlKey && e.key === 'f') {
+  // Ctrl/Cmd+F: Focus search bar
+  if (mod && e.key === 'f') {
     e.preventDefault();
     searchInput.focus();
     searchInput.select();

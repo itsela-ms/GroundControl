@@ -1,6 +1,6 @@
 {
   "name": "deepsky",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "description": "Your command center for GitHub Copilot CLI — manage, search, and switch between sessions from a sleek desktop app.",
   "main": "src/main.js",
   "author": "itsela-ms",
@@ -10,7 +10,9 @@
     "start": "npm run build && electron . --no-sandbox",
     "launch": "npm run build && wscript launch.vbs",
     "test": "vitest run",
-    "dist": "npm run build && electron-builder --win"
+    "dist": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:all": "npm run build && electron-builder --win --mac"
   },
   "build": {
     "appId": "com.itsela.deepsky",
@@ -28,6 +30,11 @@
     "win": {
       "target": "nsis",
       "icon": "deepsky.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "deepsky.png",
+      "category": "public.app-category.developer-tools"
     },
     "nsis": {
       "oneClick": true,

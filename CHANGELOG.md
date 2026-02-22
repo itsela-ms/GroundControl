@@ -2,6 +2,22 @@
 
 All notable changes to DeepSky are documented here.
 
+## [0.6.0] - 2026-02-22
+
+### Added
+- macOS support — native title bar, Dock behavior, `Cmd` shortcuts, DMG distribution
+- macOS install instructions and keyboard shortcut column in README
+- `dist:mac` and `dist:all` build scripts
+- `sql`, `sqlite`, `database` tag recognition in session indexer
+
+### Changed
+- Replaced session dashboard with minimal empty state (DeepSky logo + New Session button)
+- Cross-platform path resolution — `os.homedir()` instead of `process.env.USERPROFILE`
+- Copilot binary discovery uses `which`/`where` per platform
+
+### Fixed
+- `setTitleBarOverlay` crash on macOS (guard behind `!isMac`)
+
 ## [0.5.4] - 2026-02-22
 
 ### Added

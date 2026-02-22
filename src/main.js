@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, Notification, Menu, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const SessionService = require('./session-service');
 const PtyManager = require('./pty-manager');
 const TagIndexer = require('./tag-indexer');
@@ -8,6 +9,8 @@ const ResourceIndexer = require('./resource-indexer');
 const SettingsService = require('./settings-service');
 const NotificationService = require('./notification-service');
 const UpdateService = require('./update-service');
+
+const isMac = process.platform === 'darwin';
 
 // Prevent Chromium GPU compositing artifacts (rectangular patches of wrong shade on dark backgrounds)
 app.commandLine.appendSwitch('disable-gpu-compositing');
@@ -23,33 +26,41 @@ let notificationService;
 let ptyFlushTimer = null;
 
 const COPILOT_PATH = resolveCopilotPath();
-const SESSION_STATE_DIR = path.join(process.env.USERPROFILE, '.copilot', 'session-state');
-const COPILOT_CONFIG_DIR = path.join(process.env.USERPROFILE, '.copilot');
+const SESSION_STATE_DIR = path.join(os.homedir(), '.copilot', 'session-state');
+const COPILOT_CONFIG_DIR = path.join(os.homedir(), '.copilot');
 const NOTIFICATIONS_DIR = path.join(COPILOT_CONFIG_DIR, 'notifications');
 const INSTRUCTIONS_PATH = path.join(COPILOT_CONFIG_DIR, 'copilot-instructions.md');
 
 function resolveCopilotPath() {
   const { execSync } = require('child_process');
+  const bin = isMac ? 'copilot' : 'copilot.exe';
+  const whichCmd = isMac ? `which ${bin}` : `where ${bin}`;
 
   // 1. Check PATH (works regardless of install method)
   try {
-    const result = execSync('where copilot.exe', { encoding: 'utf8', timeout: 5000 }).trim();
+    const result = execSync(whichCmd, { encoding: 'utf8', timeout: 5000 }).trim();
     const firstMatch = result.split(/\r?\n/)[0];
     if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
   } catch {}
 
   // 2. Known install locations
-  const candidates = [
-    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Links', 'copilot.exe'),
-    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'copilot-cli', 'copilot.exe'),
-    path.join(process.env.PROGRAMFILES || '', 'GitHub Copilot CLI', 'copilot.exe'),
-  ];
+  const candidates = isMac
+    ? [
+        '/usr/local/bin/copilot',
+        '/opt/homebrew/bin/copilot',
+        path.join(os.homedir(), '.local', 'bin', 'copilot'),
+      ]
+    : [
+        path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Links', 'copilot.exe'),
+        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'copilot-cli', 'copilot.exe'),
+        path.join(process.env.PROGRAMFILES || '', 'GitHub Copilot CLI', 'copilot.exe'),
+      ];
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
 
   // 3. Fall back to bare command name — let the OS resolve it at spawn time
-  return 'copilot.exe';
+  return bin;
 }
 
 function createWindow() {
@@ -57,26 +68,30 @@ function createWindow() {
   const bg = theme === 'latte' ? '#eff1f5' : '#1e1e2e';
   const fg = theme === 'latte' ? '#4c4f69' : '#cdd6f4';
 
-  mainWindow = new BrowserWindow({
+  const winOptions = {
     width: 1400,
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    icon: path.join(__dirname, '..', 'deepsky.ico'),
+    icon: path.join(__dirname, '..', isMac ? 'deepsky.png' : 'deepsky.ico'),
     backgroundColor: bg,
     frame: false,
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: bg,
-      symbolColor: fg,
-      height: 36
-    },
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js')
     }
-  });
+  };
+
+  if (isMac) {
+    winOptions.titleBarStyle = 'hiddenInset';
+    winOptions.trafficLightPosition = { x: 12, y: 10 };
+  } else {
+    winOptions.titleBarStyle = 'hidden';
+    winOptions.titleBarOverlay = { color: bg, symbolColor: fg, height: 36 };
+  }
+
+  mainWindow = new BrowserWindow(winOptions);
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
@@ -131,15 +146,25 @@ app.whenReady().then(async () => {
 
   notificationService.start();
 
-  // Custom menu without 'paste' — xterm's custom key handler owns Ctrl+V.
+  // Custom menu without 'paste' — xterm's custom key handler owns Ctrl+V / Cmd+V.
   // The default Electron menu fires webContents.paste() before keydown reaches
   // the renderer, causing a double-paste.
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
+  const menuTemplate = [];
+  if (isMac) {
+    menuTemplate.push({ role: 'appMenu' });
+  }
+  menuTemplate.push(
     { label: 'Edit', submenu: [{ role: 'copy' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'toggleDevTools' }, { role: 'reload' }, { role: 'forceReload' }] },
-  ]));
+  );
+  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
 
   createWindow();
+
+  // macOS: re-create window when dock icon is clicked
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
 
   updateService = new UpdateService(mainWindow);
   mainWindow.webContents.on('did-finish-load', () => {
@@ -185,7 +210,7 @@ app.whenReady().then(async () => {
     if (partial.theme && mainWindow && !mainWindow.isDestroyed()) {
       const bg = partial.theme === 'latte' ? '#eff1f5' : '#1e1e2e';
       const fg = partial.theme === 'latte' ? '#4c4f69' : '#cdd6f4';
-      mainWindow.setTitleBarOverlay({ color: bg, symbolColor: fg });
+      if (!isMac) mainWindow.setTitleBarOverlay({ color: bg, symbolColor: fg });
       mainWindow.setBackgroundColor(bg);
     }
 
@@ -310,6 +335,12 @@ app.on('window-all-closed', async () => {
   resourceIndexer.stop();
   notificationService.stop();
   if (ptyFlushTimer) { clearTimeout(ptyFlushTimer); ptyFlushTimer = null; }
+
+  // On macOS, keep the app running (standard Mac behavior)
+  if (isMac) {
+    ptyManager.killAll();
+    return;
+  }
 
   // Kill sessions that are idle (not producing output)
   ptyManager.killIdle(BUSY_THRESHOLD_MS);
