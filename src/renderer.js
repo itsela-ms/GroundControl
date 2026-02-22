@@ -50,6 +50,9 @@ const searchInput = document.getElementById('search');
 const searchClear = document.getElementById('search-clear');
 const terminalContainer = document.getElementById('terminal-container');
 const terminalTabs = document.getElementById('terminal-tabs');
+const tabsScrollArea = terminalTabs.querySelector('.tabs-scroll-area');
+const tabScrollLeft = terminalTabs.querySelector('.tab-scroll-left');
+const tabScrollRight = terminalTabs.querySelector('.tab-scroll-right');
 const emptyState = document.getElementById('empty-state');
 const btnNew = document.getElementById('btn-new');
 const btnNewCenter = document.getElementById('btn-new-center');
@@ -173,6 +176,7 @@ async function init() {
           terminals.delete(sessionId);
           const tab = document.querySelector(`.tab[data-session-id="${sessionId}"]`);
           if (tab) tab.remove();
+          updateTabScrollButtons();
           if (activeSessionId === sessionId) {
             activeSessionId = null;
             const remaining = document.querySelectorAll('.tab');
@@ -205,6 +209,7 @@ async function init() {
     }
     const tab = document.querySelector(`.tab[data-session-id="${sessionId}"]`);
     if (tab) tab.remove();
+    updateTabScrollButtons();
     if (activeSessionId === sessionId) {
       activeSessionId = null;
       const remaining = document.querySelectorAll('.tab');
@@ -272,6 +277,16 @@ async function init() {
     btnToggleResources.classList.remove('active');
     fitActiveTerminal();
   });
+
+  // Tab scroll buttons
+  tabScrollLeft.addEventListener('click', () => {
+    tabsScrollArea.scrollBy({ left: -200, behavior: 'smooth' });
+  });
+  tabScrollRight.addEventListener('click', () => {
+    tabsScrollArea.scrollBy({ left: 200, behavior: 'smooth' });
+  });
+  tabsScrollArea.addEventListener('scroll', updateTabScrollButtons);
+  new ResizeObserver(updateTabScrollButtons).observe(tabsScrollArea);
 
   // Notifications
   document.getElementById('btn-notifications').addEventListener('click', toggleNotificationPanel);
@@ -907,6 +922,10 @@ function switchToSession(sessionId) {
     tab.classList.toggle('active', tab.dataset.sessionId === sessionId);
   });
 
+  // Scroll the active tab into view
+  const activeTab = document.querySelector(`.tab[data-session-id="${sessionId}"]`);
+  if (activeTab) activeTab.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+
   updateResourcePanel(sessionId);
   patchActiveHighlight();
   patchSessionStateBadges();
@@ -960,7 +979,8 @@ function addTab(sessionId, title) {
   });
 
   // Insert before the resource toggle button
-  terminalTabs.insertBefore(tab, btnToggleResources);
+  tabsScrollArea.insertBefore(tab, btnToggleResources);
+  updateTabScrollButtons();
 }
 
 function updateTabTitle(sessionId, title) {
@@ -971,6 +991,13 @@ function updateTabTitle(sessionId, title) {
     tab.textContent = display;
     tab.title = title;
   }
+}
+
+function updateTabScrollButtons() {
+  const el = tabsScrollArea;
+  const overflows = el.scrollWidth > el.clientWidth;
+  tabScrollLeft.classList.toggle('visible', overflows && el.scrollLeft > 0);
+  tabScrollRight.classList.toggle('visible', overflows && el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
 }
 
 async function closeTab(sessionId) {
@@ -991,6 +1018,7 @@ async function closeTab(sessionId) {
 
   const tab = document.querySelector(`.tab[data-session-id="${sessionId}"]`);
   if (tab) tab.remove();
+  updateTabScrollButtons();
 
   if (activeSessionId === sessionId) {
     activeSessionId = null;

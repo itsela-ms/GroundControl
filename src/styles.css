@@ -90,16 +90,17 @@ body.platform-mac #titlebar {
   transition: color 0.15s;
 }
 .titlebar-text:hover { color: var(--text); }
-  letter-spacing: 0.5px;
-}
 
 .titlebar-actions {
   -webkit-app-region: no-drag;
+  app-region: no-drag;
   display: flex;
   gap: 6px;
 }
 
 #btn-notifications, #btn-instructions, #btn-settings {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
   background: none;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -493,13 +494,51 @@ body.platform-mac #titlebar {
   display: flex;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
+  overflow: hidden;
   flex-shrink: 0;
   min-height: 36px;
+  position: relative;
 }
 
-#terminal-tabs::-webkit-scrollbar {
-  height: 2px;
+#terminal-tabs .tabs-scroll-area {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none; /* Firefox */
+  min-width: 0;
+}
+
+#terminal-tabs .tabs-scroll-area::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-scroll-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  border-left: 1px solid var(--border);
+  transition: color 0.15s, background 0.15s;
+}
+
+.tab-scroll-btn:first-child {
+  border-left: none;
+  border-right: 1px solid var(--border);
+}
+
+.tab-scroll-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.tab-scroll-btn.visible {
+  display: flex;
 }
 
 .tab {
@@ -512,7 +551,8 @@ body.platform-mac #titlebar {
   white-space: nowrap;
   display: flex;
   align-items: center;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 80px;
   transition: all 0.1s;
   max-width: 200px;
   position: relative;
