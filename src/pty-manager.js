@@ -14,10 +14,21 @@ class PtyManager extends EventEmitter {
     this.sessions = new Map();
     this.settingsService = settingsService;
     this._pty = ptyModule || defaultPty;
+
+    // On Windows, .cmd files must be spawned via cmd.exe
+    this._useCmd = process.platform === 'win32' &&
+      copilotPath.toLowerCase().endsWith('.cmd');
   }
 
   _generateId() {
     return crypto.randomUUID();
+  }
+
+  _spawnArgs(extraArgs) {
+    if (this._useCmd) {
+      return { file: 'cmd.exe', args: ['/c', this.copilotPath, ...extraArgs] };
+    }
+    return { file: this.copilotPath, args: extraArgs };
   }
 
   get maxConcurrent() {
@@ -40,7 +51,8 @@ class PtyManager extends EventEmitter {
 
     let ptyProcess;
     try {
-      ptyProcess = this._pty.spawn(this.copilotPath, ['--resume', sessionId, '--yolo'], {
+      const { file, args } = this._spawnArgs(['--resume', sessionId, '--yolo']);
+      ptyProcess = this._pty.spawn(file, args, {
         name: 'xterm-256color',
         cols: 120,
         rows: 40,
@@ -72,7 +84,7 @@ class PtyManager extends EventEmitter {
       pty: ptyProcess,
       alive: true,
       openedAt: Date.now(),
-      lastDataAt: Date.now()
+      lastDataAt: null
     });
 
     return sessionId;
@@ -85,7 +97,8 @@ class PtyManager extends EventEmitter {
 
     let ptyProcess;
     try {
-      ptyProcess = this._pty.spawn(this.copilotPath, ['--resume', sessionId, '--yolo'], {
+      const { file, args } = this._spawnArgs(['--resume', sessionId, '--yolo']);
+      ptyProcess = this._pty.spawn(file, args, {
         name: 'xterm-256color',
         cols: 120,
         rows: 40,
@@ -117,7 +130,7 @@ class PtyManager extends EventEmitter {
       pty: ptyProcess,
       alive: true,
       openedAt: Date.now(),
-      lastDataAt: Date.now()
+      lastDataAt: null
     });
 
     return sessionId;

@@ -33,15 +33,16 @@ const INSTRUCTIONS_PATH = path.join(COPILOT_CONFIG_DIR, 'copilot-instructions.md
 
 function resolveCopilotPath() {
   const { execSync } = require('child_process');
-  const bin = isMac ? 'copilot' : 'copilot.exe';
-  const whichCmd = isMac ? `which ${bin}` : `where ${bin}`;
-
-  // 1. Check PATH (works regardless of install method)
-  try {
-    const result = execSync(whichCmd, { encoding: 'utf8', timeout: 5000 }).trim();
-    const firstMatch = result.split(/\r?\n/)[0];
-    if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
-  } catch {}
+  // 1. Check PATH for copilot binary (copilot.exe and copilot.cmd on Windows)
+  const names = isMac ? ['copilot'] : ['copilot.exe', 'copilot.cmd'];
+  for (const bin of names) {
+    const whichCmd = isMac ? `which ${bin}` : `where ${bin}`;
+    try {
+      const result = execSync(whichCmd, { encoding: 'utf8', timeout: 5000 }).trim();
+      const firstMatch = result.split(/\r?\n/)[0];
+      if (firstMatch && fs.existsSync(firstMatch)) return firstMatch;
+    } catch {}
+  }
 
   // 2. Known install locations
   const candidates = isMac
