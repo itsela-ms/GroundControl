@@ -110,6 +110,30 @@ body {
   border-color: var(--accent);
 }
 
+/* Update badge on settings gear */
+#btn-settings {
+  position: relative;
+}
+.update-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: var(--green, #a6e3a1);
+  color: var(--bg-primary);
+  font-size: 9px;
+  font-weight: 700;
+  min-width: 14px;
+  height: 14px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  line-height: 1;
+  pointer-events: none;
+}
+.update-badge.hidden { display: none; }
+
 /* Main app layout */
 #app {
   display: flex;
@@ -265,9 +289,8 @@ body {
 /* Sidebar footer — removed, settings moved to modal */
 
 .session-item {
-  padding: 10px 32px 10px 12px;
+  padding: 10px 32px 10px 15px;
   cursor: pointer;
-  border-left: 3px solid transparent;
   transition: all 0.1s;
   position: relative;
 }
@@ -278,7 +301,6 @@ body {
 
 .session-item.active {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border-left-color: var(--accent);
 }
 
 .session-item.running::after {

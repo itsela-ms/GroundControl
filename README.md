@@ -42,7 +42,6 @@ Copilot CLI is powerful, but managing sessions is painful. You're copying UUIDs,
 
 ### Polish
 - **Catppuccin themes** — Mocha (dark) and Latte (light), because aesthetics matter
-- **Keyboard-first** — `Ctrl+N` new session, `Ctrl+Tab` switch, `Ctrl+W` close, `Esc` dismiss
 - **Auto-updates** — new versions download and install in the background
 
 ---
@@ -78,20 +77,7 @@ npm start
 
 ## Updates
 
-DeepSky checks for updates automatically on startup. You can also check manually via **Settings → About → Check for Updates**. Downloads happen in the background — click **Restart & Update** when ready.
-
----
-
-## Keyboard Shortcuts
-
-| Shortcut | macOS | Action |
-|----------|-------|--------|
-| `Ctrl+N` | `Cmd+N` | New session |
-| `Ctrl+Tab` | `Ctrl+Tab` | Next tab |
-| `Ctrl+Shift+Tab` | `Ctrl+Shift+Tab` | Previous tab |
-| `Ctrl+W` | `Cmd+W` | Close tab |
-| `Ctrl+V` / `Shift+Ins` | `Cmd+V` | Paste |
-| `Esc` | `Esc` | Dismiss panels / clear search |
+DeepSky checks for updates automatically every 15 minutes. When a new version is found, it downloads silently and installs on your next quit — no restarts, no interruptions. A green badge on the settings gear lets you know an update is pending.
 
 ---
 

@@ -1,6 +1,8 @@
 const { autoUpdater } = require('electron-updater');
 const { ipcMain } = require('electron');
 
+const CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+
 class UpdateService {
   constructor(mainWindow) {
     this.mainWindow = mainWindow;
@@ -8,9 +10,10 @@ class UpdateService {
     this.updateInfo = null;
     this.error = null;
     this.progress = null;
+    this._checkTimer = null;
 
-    autoUpdater.autoDownload = false;
-    autoUpdater.autoInstallOnAppQuit = false;
+    autoUpdater.autoDownload = true;
+    autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.allowPrerelease = true;
 
     autoUpdater.on('checking-for-update', () => {
@@ -69,17 +72,6 @@ class UpdateService {
       }
     });
 
-    ipcMain.handle('update:download', async () => {
-      try {
-        return await autoUpdater.downloadUpdate();
-      } catch (err) {
-        this.status = 'error';
-        this.error = err?.message || 'Failed to download update';
-        this._send('update:status', { status: this.status, error: this.error });
-        return { status: 'error', error: this.error };
-      }
-    });
-
     ipcMain.handle('update:install', () => {
       autoUpdater.quitAndInstall(false, true);
     });
@@ -98,6 +90,27 @@ class UpdateService {
         // Silent fail on startup — user can check manually
       }
     }, 5000);
+
+    this._startPeriodicCheck();
+  }
+
+  _startPeriodicCheck() {
+    if (this._checkTimer) clearInterval(this._checkTimer);
+    this._checkTimer = setInterval(async () => {
+      if (this.status === 'downloaded' || this.status === 'downloading') return;
+      try {
+        await autoUpdater.checkForUpdates();
+      } catch {
+        // Silent fail — next interval will retry
+      }
+    }, CHECK_INTERVAL_MS);
+  }
+
+  dispose() {
+    if (this._checkTimer) {
+      clearInterval(this._checkTimer);
+      this._checkTimer = null;
+    }
   }
 }
 

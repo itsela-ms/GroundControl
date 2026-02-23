@@ -87,7 +87,15 @@ const notificationPanel = document.getElementById('notification-panel');
 const notificationListEl = document.getElementById('notification-list');
 const toastContainer = document.getElementById('toast-container');
 
+const titlebar = document.getElementById('titlebar');
 const NOTIF_ICONS = { 'task-done': '✓', 'needs-input': '◌', 'error': '!', 'info': '·' };
+
+const OVERLAY_BASE_PX = 140;
+async function syncTitlebarPadding() {
+  const zoom = await window.api.getZoom();
+  titlebar.style.paddingRight = `${Math.ceil(OVERLAY_BASE_PX / zoom)}px`;
+}
+syncTitlebarPadding();
 
 // Delegated event handling for session list items (avoids per-item listener churn)
 let _titleClickTimeout = null;
@@ -298,10 +306,6 @@ async function init() {
   // Notifications
   document.getElementById('btn-notifications').addEventListener('click', toggleNotificationPanel);
   document.getElementById('btn-close-notifications').addEventListener('click', () => notificationPanel.classList.add('hidden'));
-  document.getElementById('btn-mark-all-read').addEventListener('click', async () => {
-    await window.api.markAllNotificationsRead();
-    await refreshNotifications();
-  });
   document.getElementById('btn-clear-notifications').addEventListener('click', async () => {
     await window.api.clearAllNotifications();
     await refreshNotifications();
@@ -414,12 +418,11 @@ function handleUpdateStatus(data) {
       statusEl.textContent = `Downloading v${data.info?.version}…`;
       statusEl.className = 'update-status';
       btnCheck.disabled = true;
-      // Auto-start download
-      window.api.downloadUpdate();
       break;
     case 'not-available':
       statusEl.textContent = 'You\'re on the latest version.';
       statusEl.className = 'update-status';
+      setUpdateBadge(false);
       break;
     case 'downloading':
       statusEl.textContent = `Downloading… ${Math.round(data.progress?.percent || 0)}%`;
@@ -428,9 +431,9 @@ function handleUpdateStatus(data) {
       btnCheck.disabled = true;
       break;
     case 'downloaded':
-      statusEl.textContent = `v${data.info?.version} ready to install.`;
+      statusEl.textContent = `v${data.info?.version} will be installed on next quit.`;
       statusEl.className = 'update-status update-available';
-      promptInstallUpdate(data.info?.version);
+      setUpdateBadge(true, data.info?.version);
       break;
     case 'error':
       statusEl.textContent = `Update error: ${data.error}`;
@@ -442,34 +445,22 @@ function handleUpdateStatus(data) {
   }
 }
 
-let updatePromptShown = false;
-function promptInstallUpdate(version) {
-  if (updatePromptShown) return;
-  updatePromptShown = true;
-
-  const overlay = document.createElement('div');
-  overlay.className = 'confirm-overlay';
-  overlay.innerHTML = `
-    <div class="confirm-dialog">
-      <h3>Update ready</h3>
-      <p>v${escapeHtml(version || 'new')} has been downloaded. Restart now to apply the update?</p>
-      <div class="confirm-actions">
-        <button class="btn-secondary confirm-cancel">Later</button>
-        <button class="btn-primary confirm-install">Restart & Update</button>
-      </div>
-    </div>`;
-
-  document.body.appendChild(overlay);
-
-  const cleanup = () => { overlay.remove(); updatePromptShown = false; };
-  overlay.querySelector('.confirm-cancel').addEventListener('click', cleanup);
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(); });
-  overlay.querySelector('.confirm-install').addEventListener('click', () => {
-    window.api.installUpdate();
-  });
-
-  const onKey = (e) => { if (e.key === 'Escape') { cleanup(); document.removeEventListener('keydown', onKey); } };
-  document.addEventListener('keydown', onKey);
+function setUpdateBadge(show, version) {
+  let badge = document.getElementById('update-badge');
+  if (show) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.id = 'update-badge';
+      badge.className = 'update-badge';
+      btnSettings.appendChild(badge);
+    }
+    badge.textContent = '↑';
+    badge.title = `v${version} ready — will apply on quit`;
+    badge.classList.remove('hidden');
+    showToast({ type: 'info', title: 'Update ready', body: `v${version} downloaded — will apply next time you close DeepSky.` });
+  } else if (badge) {
+    badge.classList.add('hidden');
+  }
 }
 
 function closeSettings() {
@@ -2017,8 +2008,13 @@ maxConcurrentInput.addEventListener('change', (e) => {
 });
 
 // Notification functions
-function toggleNotificationPanel() {
+async function toggleNotificationPanel() {
+  const wasHidden = notificationPanel.classList.contains('hidden');
   notificationPanel.classList.toggle('hidden');
+  if (wasHidden) {
+    await window.api.markAllNotificationsRead();
+    await refreshNotifications();
+  }
 }
 
 async function refreshNotifications() {
@@ -2122,6 +2118,7 @@ function showToast(notification) {
 // Zoom — refit all terminals after the zoom factor changes
 async function applyZoom(direction) {
   await window.api.setZoom(direction);
+  syncTitlebarPadding();
   // Small delay lets Electron apply the new factor before we refit
   setTimeout(() => { for (const { fitAddon } of terminals.values()) try { fitAddon.fit(); } catch {} }, 100);
 }

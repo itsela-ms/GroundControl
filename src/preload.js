@@ -52,7 +52,6 @@ contextBridge.exposeInMainWorld('api', {
 
   // Updates
   checkForUpdates: () => ipcRenderer.invoke('update:check'),
-  downloadUpdate: () => ipcRenderer.invoke('update:download'),
   installUpdate: () => ipcRenderer.invoke('update:install'),
   getUpdateStatus: () => ipcRenderer.invoke('update:getStatus'),
   onUpdateStatus: (callback) => {

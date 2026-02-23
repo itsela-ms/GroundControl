@@ -2,6 +2,25 @@
 
 All notable changes to DeepSky are documented here.
 
+## [0.6.0] - 2026-02-23
+
+### Added
+- **Session grouping** — Edge-style group management in the Active sidebar
+  - Create, rename, and recolor groups via context menu
+  - Drag-and-drop to reorder sessions and move them between groups
+  - Collapse/expand groups with session count badges
+  - Right-click context menus for sessions and group headers (rename, color, ungroup, close all)
+  - 8 Catppuccin-themed preset group colors
+- **Manual session ordering** — drag to reorder sessions freely; order persisted across restarts
+- **Drop indicators** — top/bottom highlight when reordering via drag-and-drop
+- **Input validation** — group names capped at 50 chars; corrupted group state gracefully restored
+
+### Changed
+- **Silent auto-updates** — updates download in the background and install on quit; no restart prompts
+- Background update check every 15 minutes
+- Green badge on settings gear when an update is pending
+- Removed keyboard shortcuts section from README
+
 ## [0.5.5] - 2026-02-23
 
 ### Added
