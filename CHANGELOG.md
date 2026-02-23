@@ -2,6 +2,32 @@
 
 All notable changes to DeepSky are documented here.
 
+## [0.5.5] - 2026-02-23
+
+### Added
+- CI workflow for Windows builds (GitHub Actions)
+- Tab scroll indicators — left/right arrows appear when tabs overflow the tab bar
+- SQL/SQLite/database tag recognition for sessions
+- Pending sessions now surface on the active tab (not just running ones)
+
+### Changed
+- Removed macOS support (Windows-only for now)
+- Replaced session dashboard with minimal empty state
+- Cross-platform path handling (`os.homedir`), platform-aware binary discovery
+- Tabs shrink instead of always overflowing (`flex-shrink: 1`, `min-width: 80px`)
+- App icon upscaled to 512×512 for electron-builder
+
+### Fixed
+- Copilot CLI `.cmd` shim not found on Windows npm installs — now searches both `.exe` and `.cmd`, spawns via `cmd.exe /c`
+- Titlebar buttons unclickable on Electron 35 — Windows `titleBarOverlay` intercepted clicks; fixed with explicit `app-region: no-drag`
+- Horizontal scrollbar overflow in terminal area — flex `min-width: auto` prevented shrinking
+- "Working" badge on startup lasting ~30s — `lastDataAt` was initialized to `Date.now()`
+- "Pending" state never showing for sessions with PRs
+- Session state priority reworked — Pending now overrides all states; updated tips for Working/Waiting/Idle
+- Memory leaks — IPC listeners not cleaned up, xterm terminals not disposed on pty exit, dead pty entries accumulating in Map
+- Unbounded memory — notification `processedFiles` Set uncapped, `sessionLastUsed`/`sessionAliveState`/`sessionIdleCount` not cleaned on close
+- Event handling — replaced per-item `addEventListener` with event delegation; fixed title click race condition
+
 ## [0.5.4] - 2026-02-22
 
 ### Added

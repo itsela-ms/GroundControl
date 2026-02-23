@@ -125,14 +125,6 @@ sessionList.addEventListener('keydown', (e) => {
 
 // Initialize
 async function init() {
-  // Platform detection — add CSS class + update tooltip labels
-  if (window.api.isMac) {
-    document.body.classList.add('platform-mac');
-    document.querySelectorAll('[title*="Ctrl+"]').forEach(el => {
-      el.title = el.title.replace(/Ctrl\+/g, '⌘');
-    });
-  }
-
   const settings = await window.api.getSettings();
   maxConcurrentInput.value = settings.maxConcurrent;
   if (settings.sidebarWidth) {
@@ -555,10 +547,7 @@ function renderSessionList() {
 
   let displayed;
   if (currentSidebarTab === 'active') {
-    displayed = allSessions.filter(s =>
-      activeIds.has(s.id) ||
-      (s.resources && s.resources.some(r => r.type === 'pr') && !sessionAliveState.has(s.id))
-    );
+    displayed = allSessions.filter(s => activeIds.has(s.id));
     displayed.sort((a, b) => (sessionLastUsed.get(b.id) || 0) - (sessionLastUsed.get(a.id) || 0));
   } else {
     displayed = allSessions;

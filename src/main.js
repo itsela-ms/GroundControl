@@ -10,9 +10,7 @@ const SettingsService = require('./settings-service');
 const NotificationService = require('./notification-service');
 const UpdateService = require('./update-service');
 
-const isMac = process.platform === 'darwin';
-
-// Prevent Chromium GPU compositing artifacts (rectangular patches of wrong shade on dark backgrounds)
+// Prevent Chromium GPU compositing artifacts(rectangular patches of wrong shade on dark backgrounds)
 app.commandLine.appendSwitch('disable-gpu-compositing');
 
 let mainWindow;
@@ -34,9 +32,9 @@ const INSTRUCTIONS_PATH = path.join(COPILOT_CONFIG_DIR, 'copilot-instructions.md
 function resolveCopilotPath() {
   const { execSync } = require('child_process');
   // 1. Check PATH for copilot binary (copilot.exe and copilot.cmd on Windows)
-  const names = isMac ? ['copilot'] : ['copilot.exe', 'copilot.cmd'];
+  const names = ['copilot.exe', 'copilot.cmd'];
   for (const bin of names) {
-    const whichCmd = isMac ? `which ${bin}` : `where ${bin}`;
+    const whichCmd = `where ${bin}`;
     try {
       const result = execSync(whichCmd, { encoding: 'utf8', timeout: 5000 }).trim();
       const firstMatch = result.split(/\r?\n/)[0];
@@ -45,17 +43,11 @@ function resolveCopilotPath() {
   }
 
   // 2. Known install locations
-  const candidates = isMac
-    ? [
-        '/usr/local/bin/copilot',
-        '/opt/homebrew/bin/copilot',
-        path.join(os.homedir(), '.local', 'bin', 'copilot'),
-      ]
-    : [
-        path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Links', 'copilot.exe'),
-        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'copilot-cli', 'copilot.exe'),
-        path.join(process.env.PROGRAMFILES || '', 'GitHub Copilot CLI', 'copilot.exe'),
-      ];
+  const candidates = [
+    path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WinGet', 'Links', 'copilot.exe'),
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'copilot-cli', 'copilot.exe'),
+    path.join(process.env.PROGRAMFILES || '', 'GitHub Copilot CLI', 'copilot.exe'),
+  ];
   for (const p of candidates) {
     if (fs.existsSync(p)) return p;
   }
@@ -74,7 +66,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    icon: path.join(__dirname, '..', isMac ? 'deepsky.png' : 'deepsky.ico'),
+    icon: path.join(__dirname, '..', 'deepsky.ico'),
     backgroundColor: bg,
     frame: false,
     webPreferences: {
@@ -84,13 +76,8 @@ function createWindow() {
     }
   };
 
-  if (isMac) {
-    winOptions.titleBarStyle = 'hiddenInset';
-    winOptions.trafficLightPosition = { x: 12, y: 10 };
-  } else {
-    winOptions.titleBarStyle = 'hidden';
-    winOptions.titleBarOverlay = { color: bg, symbolColor: fg, height: 36 };
-  }
+  winOptions.titleBarStyle = 'hidden';
+  winOptions.titleBarOverlay = { color: bg, symbolColor: fg, height: 36 };
 
   mainWindow = new BrowserWindow(winOptions);
 
@@ -151,9 +138,6 @@ app.whenReady().then(async () => {
   // The default Electron menu fires webContents.paste() before keydown reaches
   // the renderer, causing a double-paste.
   const menuTemplate = [];
-  if (isMac) {
-    menuTemplate.push({ role: 'appMenu' });
-  }
   menuTemplate.push(
     { label: 'Edit', submenu: [{ role: 'copy' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'toggleDevTools' }, { role: 'reload' }, { role: 'forceReload' }] },
@@ -161,11 +145,6 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
 
   createWindow();
-
-  // macOS: re-create window when dock icon is clicked
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
 
   updateService = new UpdateService(mainWindow);
   mainWindow.webContents.on('did-finish-load', () => {
@@ -211,7 +190,7 @@ app.whenReady().then(async () => {
     if (partial.theme && mainWindow && !mainWindow.isDestroyed()) {
       const bg = partial.theme === 'latte' ? '#eff1f5' : '#1e1e2e';
       const fg = partial.theme === 'latte' ? '#4c4f69' : '#cdd6f4';
-      if (!isMac) mainWindow.setTitleBarOverlay({ color: bg, symbolColor: fg });
+      mainWindow.setTitleBarOverlay({ color: bg, symbolColor: fg });
       mainWindow.setBackgroundColor(bg);
     }
 
@@ -342,13 +321,7 @@ app.on('window-all-closed', async () => {
   notificationService.stop();
   if (ptyFlushTimer) { clearTimeout(ptyFlushTimer); ptyFlushTimer = null; }
 
-  // On macOS, keep the app running (standard Mac behavior)
-  if (isMac) {
-    ptyManager.killAll();
-    return;
-  }
-
-  // Kill sessions that are idle (not producing output)
+  // Kill sessions that are idle(not producing output)
   ptyManager.killIdle(BUSY_THRESHOLD_MS);
 
   const busy = ptyManager.getBusySessions(BUSY_THRESHOLD_MS);

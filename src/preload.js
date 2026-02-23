@@ -1,9 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-  // Platform
-  isMac: process.platform === 'darwin',
-
   // Sessions
   listSessions: () => ipcRenderer.invoke('sessions:list'),
   renameSession: (sessionId, title) => ipcRenderer.invoke('session:rename', sessionId, title),
