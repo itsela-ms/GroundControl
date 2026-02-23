@@ -83,6 +83,12 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
+  // Restore persisted zoom level
+  const zoomFactor = settingsService.get().zoomFactor || 1.0;
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.setZoomFactor(zoomFactor);
+  });
+
   mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
@@ -195,6 +201,26 @@ app.whenReady().then(async () => {
     }
 
     return updated;
+  });
+
+  // IPC: Zoom
+  const ZOOM_MIN = 0.75;
+  const ZOOM_MAX = 1.5;
+  const ZOOM_STEP = 0.05;
+
+  ipcMain.handle('zoom:get', () => mainWindow.webContents.getZoomFactor());
+
+  ipcMain.handle('zoom:set', async (event, direction) => {
+    const current = mainWindow.webContents.getZoomFactor();
+    let next;
+    if (direction === 'in') next = Math.min(current + ZOOM_STEP, ZOOM_MAX);
+    else if (direction === 'out') next = Math.max(current - ZOOM_STEP, ZOOM_MIN);
+    else if (direction === 'reset') next = 1.0;
+    else next = Math.min(Math.max(Number(direction) || 1.0, ZOOM_MIN), ZOOM_MAX);
+    next = Math.round(next * 100) / 100;
+    mainWindow.webContents.setZoomFactor(next);
+    await settingsService.update({ zoomFactor: next });
+    return next;
   });
 
   // IPC: Get active sessions

@@ -9,6 +9,9 @@ const DEFAULTS = {
   copilotPath: '', // auto-detect if empty; override with full path to copilot binary
   openTabs: [], // session IDs of tabs to restore on startup
   activeTab: null, // session ID of the last active tab
+  tabGroups: [], // Array of { id, name, color, collapsed, tabIds }
+  sessionOrder: [], // Manual ordering of active session IDs in sidebar
+  zoomFactor: 1.0, // 0.75 – 1.5
 };
 
 class SettingsService {

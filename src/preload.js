@@ -42,6 +42,10 @@ contextBridge.exposeInMainWorld('api', {
   // Shell
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 
+  // Zoom
+  setZoom: (direction) => ipcRenderer.invoke('zoom:set', direction),
+  getZoom: () => ipcRenderer.invoke('zoom:get'),
+
   // App info
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getChangelog: () => ipcRenderer.invoke('app:getChangelog'),

@@ -19,9 +19,24 @@ const sessionLastUsed = new Map();
 let creatingSession = false;
 const ipcCleanups = []; // unsubscribe fns for IPC listeners
 
+// Tab group state
+let tabGroups = []; // Array of { id, name, color, collapsed, tabIds }
+let sessionOrder = []; // Manual ordering of active session IDs in sidebar
+const GROUP_COLORS = [
+  { name: 'Grey', value: '#585b70' },
+  { name: 'Blue', value: '#89b4fa' },
+  { name: 'Red', value: '#f38ba8' },
+  { name: 'Yellow', value: '#f9e2af' },
+  { name: 'Green', value: '#a6e3a1' },
+  { name: 'Pink', value: '#f5c2e7' },
+  { name: 'Purple', value: '#cba6f7' },
+  { name: 'Cyan', value: '#94e2d5' },
+];
+let nextGroupColorIdx = 0;
+
 function saveTabState() {
   const openTabs = [...terminals.keys()];
-  window.api.updateSettings({ openTabs, activeTab: activeSessionId });
+  window.api.updateSettings({ openTabs, activeTab: activeSessionId, tabGroups, sessionOrder });
 }
 
 // Theme palettes for xterm.js
@@ -320,6 +335,28 @@ async function init() {
     for (const sessionId of tabsToRestore) {
       try { await openSession(sessionId); } catch {}
     }
+
+    // Restore tab groups (with validation)
+    if (Array.isArray(settings.tabGroups) && settings.tabGroups.length > 0) {
+      tabGroups = settings.tabGroups.filter(g =>
+        g && typeof g.id === 'string' && typeof g.name === 'string' &&
+        Array.isArray(g.tabIds) && g.tabIds.some(id => terminals.has(id))
+      ).map(g => ({
+        id: g.id,
+        name: (g.name || 'Group').substring(0, 50),
+        color: g.color || GROUP_COLORS[0].value,
+        collapsed: !!g.collapsed,
+        tabIds: g.tabIds.filter(id => terminals.has(id)),
+      }));
+    }
+
+    // Restore session order
+    if (Array.isArray(settings.sessionOrder) && settings.sessionOrder.length > 0) {
+      sessionOrder = settings.sessionOrder.filter(id => terminals.has(id));
+    }
+
+    renderSessionList();
+
     // Switch to the previously active tab
     if (settings.activeTab && terminals.has(settings.activeTab)) {
       switchToSession(settings.activeTab);
@@ -542,13 +579,130 @@ function scheduleRenderSessionList() {
   });
 }
 
+function createSessionItem(session, group) {
+  const el = document.createElement('div');
+  el.className = 'session-item';
+  el.dataset.sessionId = session.id;
+  if (session.id === activeSessionId) el.classList.add('active');
+  if (sessionAliveState.has(session.id)) el.classList.add('running');
+  if (group) {
+    el.classList.add('grouped');
+    el.style.borderLeft = `2px solid ${group.color}`;
+  }
+
+  const lastUsedTime = sessionLastUsed.get(session.id);
+  const timeStr = new Date(lastUsedTime || session.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  let tagsHtml = '';
+  const allPills = [];
+  if (session.resources && session.resources.length > 0) {
+    const prs = session.resources.filter(r => r.type === 'pr');
+    const wis = session.resources.filter(r => r.type === 'workitem');
+    if (prs.length > 0) allPills.push(`<span class="tag tag-pr" title="${escapeHtml(prs.map(p => 'PR ' + p.id + (p.repo ? ' (' + p.repo + ')' : '')).join('\n'))}">PR ${prs.map(p => p.id).join(', ')}</span>`);
+    if (wis.length > 0) allPills.push(`<span class="tag tag-wi" title="${escapeHtml(wis.map(w => 'WI ' + w.id).join('\n'))}">WI ${wis.map(w => w.id).join(', ')}</span>`);
+  }
+  if (session.tags && session.tags.length > 0) {
+    const repos = session.tags.filter(t => t.startsWith('repo:'));
+    const rest = session.tags.filter(t => !t.startsWith('repo:'));
+    for (const t of [...repos, ...rest]) {
+      const cls = t.startsWith('repo:') ? 'tag tag-repo' : 'tag';
+      const label = t.replace(/^(repo|tool):/, '');
+      allPills.push(`<span class="${cls}">${escapeHtml(label)}</span>`);
+    }
+  }
+  if (allPills.length > 0) {
+    const MAX_VISIBLE = 3;
+    const visible = allPills.slice(0, MAX_VISIBLE).join('');
+    const hiddenCount = allPills.length - MAX_VISIBLE;
+    const hidden = hiddenCount > 0
+      ? `<span class="tag tag-overflow">+${hiddenCount}</span><span class="tags-hidden">${allPills.slice(MAX_VISIBLE).join('')}</span>`
+      : '';
+    tagsHtml = `<div class="session-tags">${visible}${hidden}</div>`;
+  }
+
+  const isRunning = sessionAliveState.has(session.id);
+  const hasPR = session.resources && session.resources.some(r => r.type === 'pr');
+  const { label: stateLabel, cls: stateCls, tip: stateTip } = deriveSessionState({
+    isRunning,
+    isActive: session.id === activeSessionId,
+    hasPR,
+    isHistory: currentSidebarTab === 'history',
+    isBusy: sessionBusyState.get(session.id) || false
+  });
+
+  el.innerHTML = `
+    <div class="session-header-row">
+      <div class="session-title" data-title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</div>
+      <span class="session-state ${stateCls}" title="${escapeHtml(stateTip)}">${stateLabel}</span>
+    </div>
+    <div class="session-meta"><span>${timeStr}</span></div>
+    ${tagsHtml}
+    ${currentSidebarTab === 'history' ? '<button class="session-delete" title="Delete session">✕</button>' : ''}
+  `;
+
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('role', 'button');
+
+  // Drag-and-drop + context menu for active sessions
+  if (currentSidebarTab === 'active') {
+    el.setAttribute('draggable', 'true');
+    el.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('application/x-session-id', session.id);
+      e.dataTransfer.effectAllowed = 'move';
+      el.classList.add('dragging');
+    });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      sessionList.querySelectorAll('.drop-above, .drop-below').forEach(x => x.classList.remove('drop-above', 'drop-below'));
+    });
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const rect = el.getBoundingClientRect();
+      const above = e.clientY < rect.top + rect.height / 2;
+      el.classList.toggle('drop-above', above);
+      el.classList.toggle('drop-below', !above);
+    });
+    el.addEventListener('dragleave', () => {
+      el.classList.remove('drop-above', 'drop-below');
+    });
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      el.classList.remove('drop-above', 'drop-below');
+      const draggedId = e.dataTransfer.getData('application/x-session-id');
+      if (!draggedId || draggedId === session.id) return;
+      const rect = el.getBoundingClientRect();
+      const above = e.clientY < rect.top + rect.height / 2;
+      handleSessionReorder(draggedId, session.id, above, group);
+    });
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showSessionContextMenu(e, session.id);
+    });
+  }
+
+  return el;
+}
+
 function renderSessionList() {
   const activeIds = new Set([...terminals.keys()]);
 
   let displayed;
   if (currentSidebarTab === 'active') {
     displayed = allSessions.filter(s => activeIds.has(s.id));
-    displayed.sort((a, b) => (sessionLastUsed.get(b.id) || 0) - (sessionLastUsed.get(a.id) || 0));
+    // Use manual order if available, fall back to last-used sort
+    if (sessionOrder.length > 0) {
+      const orderMap = new Map(sessionOrder.map((id, i) => [id, i]));
+      displayed.sort((a, b) => {
+        const oa = orderMap.has(a.id) ? orderMap.get(a.id) : 99999;
+        const ob = orderMap.has(b.id) ? orderMap.get(b.id) : 99999;
+        if (oa !== ob) return oa - ob;
+        return (sessionLastUsed.get(b.id) || 0) - (sessionLastUsed.get(a.id) || 0);
+      });
+    } else {
+      displayed.sort((a, b) => (sessionLastUsed.get(b.id) || 0) - (sessionLastUsed.get(a.id) || 0));
+    }
   } else {
     displayed = allSessions;
   }
@@ -581,90 +735,97 @@ function renderSessionList() {
     return;
   }
 
-  let lastDateLabel = '';
-  for (const session of displayed) {
-    if (currentSidebarTab === 'history') {
-      const lastUsedTs = sessionLastUsed.get(session.id);
-      const dateLabel = getDateLabel(lastUsedTs ? new Date(lastUsedTs).toISOString() : session.updatedAt);
-      if (dateLabel !== lastDateLabel) {
-        const groupEl = document.createElement('div');
-        groupEl.className = 'session-date-group';
-        groupEl.textContent = dateLabel;
-        sessionList.appendChild(groupEl);
-        lastDateLabel = dateLabel;
+  if (currentSidebarTab === 'active' && tabGroups.length > 0 && !searchQuery) {
+    // Render grouped sessions
+    const displayedIds = new Set(displayed.map(s => s.id));
+
+    for (const group of tabGroups) {
+      const groupSessions = group.tabIds
+        .filter(id => displayedIds.has(id))
+        .map(id => displayed.find(s => s.id === id))
+        .filter(Boolean);
+
+      if (groupSessions.length === 0) continue;
+
+      // Group header
+      const headerEl = document.createElement('div');
+      headerEl.className = 'session-group-header' + (group.collapsed ? ' collapsed' : '');
+      headerEl.dataset.groupId = group.id;
+      headerEl.innerHTML = `
+        <span class="session-group-chevron">${group.collapsed ? '▸' : '▾'}</span>
+        <span class="session-group-dot" style="background: ${group.color}"></span>
+        <span class="session-group-name">${escapeHtml(group.name)}</span>
+        <span class="session-group-count">${groupSessions.length}</span>
+      `;
+      headerEl.addEventListener('click', (e) => {
+        if (e.target.getAttribute('contenteditable') === 'true') return;
+        group.collapsed = !group.collapsed;
+        renderSessionList();
+        saveTabState();
+      });
+      headerEl.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showGroupContextMenu(e, group.id);
+      });
+
+      // Make group header a drop target
+      headerEl.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        headerEl.classList.add('drag-over');
+      });
+      headerEl.addEventListener('dragleave', () => headerEl.classList.remove('drag-over'));
+      headerEl.addEventListener('drop', (e) => {
+        e.preventDefault();
+        headerEl.classList.remove('drag-over');
+        const draggedId = e.dataTransfer.getData('application/x-session-id');
+        if (draggedId) addTabToGroup(draggedId, group.id);
+      });
+
+      sessionList.appendChild(headerEl);
+
+      // Group sessions (if not collapsed)
+      if (!group.collapsed) {
+        for (const session of groupSessions) {
+          const el = createSessionItem(session, group);
+          sessionList.appendChild(el);
+        }
       }
     }
 
-    const el = document.createElement('div');
-    el.className = 'session-item';
-    el.dataset.sessionId = session.id;
-    if (session.id === activeSessionId) el.classList.add('active');
-    if (sessionAliveState.has(session.id)) el.classList.add('running');
-
-    const lastUsedTime = sessionLastUsed.get(session.id);
-    const timeStr = new Date(lastUsedTime || session.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    let tagsHtml = '';
-    // Merge resources + tags into one prioritized list
-    const allPills = [];
-    if (session.resources && session.resources.length > 0) {
-      const prs = session.resources.filter(r => r.type === 'pr');
-      const wis = session.resources.filter(r => r.type === 'workitem');
-      if (prs.length > 0) allPills.push(`<span class="tag tag-pr" title="${escapeHtml(prs.map(p => 'PR ' + p.id + (p.repo ? ' (' + p.repo + ')' : '')).join('\n'))}">PR ${prs.map(p => p.id).join(', ')}</span>`);
-      if (wis.length > 0) allPills.push(`<span class="tag tag-wi" title="${escapeHtml(wis.map(w => 'WI ' + w.id).join('\n'))}">WI ${wis.map(w => w.id).join(', ')}</span>`);
+    // Ungrouped sessions
+    const groupedIds = new Set(tabGroups.flatMap(g => g.tabIds));
+    const ungrouped = displayed.filter(s => !groupedIds.has(s.id));
+    for (const session of ungrouped) {
+      const el = createSessionItem(session, null);
+      sessionList.appendChild(el);
     }
-    if (session.tags && session.tags.length > 0) {
-      // Repos first, then everything else
-      const repos = session.tags.filter(t => t.startsWith('repo:'));
-      const rest = session.tags.filter(t => !t.startsWith('repo:'));
-      for (const t of [...repos, ...rest]) {
-        const cls = t.startsWith('repo:') ? 'tag tag-repo' : 'tag';
-        const label = t.replace(/^(repo|tool):/, '');
-        allPills.push(`<span class="${cls}">${escapeHtml(label)}</span>`);
+  } else {
+    // Original rendering (history tab or search active)
+    let lastDateLabel = '';
+    for (const session of displayed) {
+      if (currentSidebarTab === 'history') {
+        const lastUsedTs = sessionLastUsed.get(session.id);
+        const dateLabel = getDateLabel(lastUsedTs ? new Date(lastUsedTs).toISOString() : session.updatedAt);
+        if (dateLabel !== lastDateLabel) {
+          const groupEl = document.createElement('div');
+          groupEl.className = 'session-date-group';
+          groupEl.textContent = dateLabel;
+          sessionList.appendChild(groupEl);
+          lastDateLabel = dateLabel;
+        }
       }
+
+      const el = createSessionItem(session, null);
+      sessionList.appendChild(el);
     }
-    if (allPills.length > 0) {
-      const MAX_VISIBLE = 3;
-      const visible = allPills.slice(0, MAX_VISIBLE).join('');
-      const hiddenCount = allPills.length - MAX_VISIBLE;
-      const hidden = hiddenCount > 0
-        ? `<span class="tag tag-overflow">+${hiddenCount}</span><span class="tags-hidden">${allPills.slice(MAX_VISIBLE).join('')}</span>`
-        : '';
-      tagsHtml = `<div class="session-tags">${visible}${hidden}</div>`;
-    }
-
-    // Derive session state
-    const isRunning = sessionAliveState.has(session.id);
-    const hasPR = session.resources && session.resources.some(r => r.type === 'pr');
-    const { label: stateLabel, cls: stateCls, tip: stateTip } = deriveSessionState({
-      isRunning,
-      isActive: session.id === activeSessionId,
-      hasPR,
-      isHistory: currentSidebarTab === 'history',
-      isBusy: sessionBusyState.get(session.id) || false
-    });
-
-    el.innerHTML = `
-      <div class="session-header-row">
-        <div class="session-title" data-title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</div>
-        <span class="session-state ${stateCls}" title="${escapeHtml(stateTip)}">${stateLabel}</span>
-      </div>
-      <div class="session-meta"><span>${timeStr}</span></div>
-      ${tagsHtml}
-      ${currentSidebarTab === 'history' ? '<button class="session-delete" title="Delete session">✕</button>' : ''}
-    `;
-
-    el.setAttribute('tabindex', '0');
-    el.setAttribute('role', 'button');
-
-    sessionList.appendChild(el);
   }
 
   window.api.getNotifications().then(notifications => {
-    sessionList.querySelectorAll('.session-item').forEach((el, idx) => {
-      const session = displayed[idx];
-      if (!session) return;
-      const unread = notifications.filter(n => !n.read && n.sessionId === session.id).length;
+    sessionList.querySelectorAll('.session-item').forEach(el => {
+      const sessionId = el.dataset.sessionId;
+      if (!sessionId) return;
+      const unread = notifications.filter(n => !n.read && n.sessionId === sessionId).length;
       if (unread > 0) {
         const badge = document.createElement('span');
         badge.className = 'session-notification-badge';
@@ -863,6 +1024,10 @@ function createTerminal(sessionId) {
   terminal.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
     const mod = e.ctrlKey || e.metaKey;
+
+    // Let zoom shortcuts bubble to the document handler
+    if (mod && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0')) return false;
+
     const isPaste = (mod && e.key === 'v') || (e.shiftKey && e.key === 'Insert');
     if (isPaste) {
       e.preventDefault();
@@ -1008,6 +1173,18 @@ async function closeTab(sessionId) {
   sessionIdleCount.delete(sessionId);
   sessionLastUsed.delete(sessionId);
 
+  // Remove from any tab group
+  for (const group of tabGroups) {
+    const idx = group.tabIds.indexOf(sessionId);
+    if (idx !== -1) {
+      group.tabIds.splice(idx, 1);
+      if (group.tabIds.length === 0) {
+        tabGroups = tabGroups.filter(g => g.id !== group.id);
+      }
+      break;
+    }
+  }
+
   const tab = document.querySelector(`.tab[data-session-id="${sessionId}"]`);
   if (tab) tab.remove();
   updateTabScrollButtons();
@@ -1030,6 +1207,352 @@ async function closeTab(sessionId) {
 function updateTabStatus(sessionId, alive) {
   const tab = document.querySelector(`.tab[data-session-id="${sessionId}"]`);
   if (tab) tab.style.opacity = alive ? '1' : '0.5';
+}
+
+// ───────────── Session Reordering ─────────────
+
+function ensureSessionOrder() {
+  // Build sessionOrder from current active sessions if it's empty or stale
+  const activeIds = new Set([...terminals.keys()]);
+  // Add any active sessions not yet in sessionOrder
+  for (const id of activeIds) {
+    if (!sessionOrder.includes(id)) sessionOrder.push(id);
+  }
+  // Remove closed sessions
+  sessionOrder = sessionOrder.filter(id => activeIds.has(id));
+}
+
+function handleSessionReorder(draggedId, targetId, insertAbove, targetGroup) {
+  ensureSessionOrder();
+
+  // If dragged into a group, add to that group
+  const draggedGroup = getGroupForTab(draggedId);
+  if (targetGroup && (!draggedGroup || draggedGroup.id !== targetGroup.id)) {
+    // Move into target group at the right position within group.tabIds
+    if (draggedGroup) {
+      draggedGroup.tabIds = draggedGroup.tabIds.filter(id => id !== draggedId);
+      if (draggedGroup.tabIds.length === 0) tabGroups = tabGroups.filter(g => g.id !== draggedGroup.id);
+    }
+    const targetIdx = targetGroup.tabIds.indexOf(targetId);
+    const insertIdx = insertAbove ? targetIdx : targetIdx + 1;
+    if (!targetGroup.tabIds.includes(draggedId)) {
+      targetGroup.tabIds.splice(insertIdx, 0, draggedId);
+    }
+  } else if (targetGroup && draggedGroup && draggedGroup.id === targetGroup.id) {
+    // Reorder within same group
+    draggedGroup.tabIds = draggedGroup.tabIds.filter(id => id !== draggedId);
+    const targetIdx = draggedGroup.tabIds.indexOf(targetId);
+    const insertIdx = insertAbove ? targetIdx : targetIdx + 1;
+    draggedGroup.tabIds.splice(insertIdx, 0, draggedId);
+  } else if (!targetGroup && draggedGroup) {
+    // Dragging out of group to ungrouped area
+    draggedGroup.tabIds = draggedGroup.tabIds.filter(id => id !== draggedId);
+    if (draggedGroup.tabIds.length === 0) tabGroups = tabGroups.filter(g => g.id !== draggedGroup.id);
+  }
+
+  // Update global sessionOrder
+  sessionOrder = sessionOrder.filter(id => id !== draggedId);
+  const targetIdx = sessionOrder.indexOf(targetId);
+  if (targetIdx !== -1) {
+    sessionOrder.splice(insertAbove ? targetIdx : targetIdx + 1, 0, draggedId);
+  } else {
+    sessionOrder.push(draggedId);
+  }
+
+  renderSessionList();
+  saveTabState();
+}
+
+// ───────────── Tab Grouping ─────────────
+
+function generateGroupId() {
+  return 'grp-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+}
+
+function getGroupForTab(sessionId) {
+  return tabGroups.find(g => g.tabIds.includes(sessionId)) || null;
+}
+
+function createGroup(tabIds, name) {
+  const color = GROUP_COLORS[nextGroupColorIdx % GROUP_COLORS.length].value;
+  nextGroupColorIdx++;
+  const group = {
+    id: generateGroupId(),
+    name: name || `Group ${tabGroups.length + 1}`,
+    color,
+    collapsed: false,
+    tabIds: tabIds || [],
+  };
+  tabGroups.push(group);
+  renderSessionList();
+  saveTabState();
+  return group;
+}
+
+function removeGroup(groupId, closeTabs) {
+  const group = tabGroups.find(g => g.id === groupId);
+  if (!group) return;
+  if (closeTabs) {
+    for (const tabId of [...group.tabIds]) {
+      closeTab(tabId);
+    }
+  }
+  tabGroups = tabGroups.filter(g => g.id !== groupId);
+  renderSessionList();
+  saveTabState();
+}
+
+function addTabToGroup(sessionId, groupId) {
+  // Remove from any existing group first
+  for (const g of tabGroups) {
+    const idx = g.tabIds.indexOf(sessionId);
+    if (idx !== -1) g.tabIds.splice(idx, 1);
+  }
+  // Clean up empty groups left behind
+  tabGroups = tabGroups.filter(g => g.tabIds.length > 0 || g.id === groupId);
+  const group = tabGroups.find(g => g.id === groupId);
+  if (group && !group.tabIds.includes(sessionId)) {
+    group.tabIds.push(sessionId);
+    renderSessionList();
+    saveTabState();
+  }
+}
+
+function removeTabFromGroup(sessionId) {
+  for (const g of tabGroups) {
+    const idx = g.tabIds.indexOf(sessionId);
+    if (idx !== -1) {
+      g.tabIds.splice(idx, 1);
+      if (g.tabIds.length === 0) {
+        tabGroups = tabGroups.filter(grp => grp.id !== g.id);
+      }
+      break;
+    }
+  }
+  renderSessionList();
+  saveTabState();
+}
+
+function toggleGroupCollapse(groupId) {
+  const group = tabGroups.find(g => g.id === groupId);
+  if (group) {
+    group.collapsed = !group.collapsed;
+    renderSessionList();
+    saveTabState();
+  }
+}
+
+// ───────────── Context Menus ─────────────
+
+function hideContextMenu() {
+  const existing = document.getElementById('tab-context-menu');
+  if (existing) existing.remove();
+}
+
+function showContextMenu(x, y, items) {
+  hideContextMenu();
+
+  const menu = document.createElement('div');
+  menu.id = 'tab-context-menu';
+  menu.className = 'context-menu';
+
+  for (const item of items) {
+    if (item.separator) {
+      const sep = document.createElement('div');
+      sep.className = 'context-menu-separator';
+      menu.appendChild(sep);
+      continue;
+    }
+
+    if (item.colors) {
+      const colorsDiv = document.createElement('div');
+      colorsDiv.className = 'context-menu-colors';
+      for (const c of GROUP_COLORS) {
+        const swatch = document.createElement('span');
+        swatch.className = 'color-swatch';
+        if (c.value === item.currentColor) swatch.classList.add('selected');
+        swatch.style.background = c.value;
+        swatch.title = c.name;
+        swatch.addEventListener('click', () => {
+          item.onSelect(c.value);
+          hideContextMenu();
+        });
+        colorsDiv.appendChild(swatch);
+      }
+      menu.appendChild(colorsDiv);
+      continue;
+    }
+
+    if (item.submenu) {
+      const submenuWrapper = document.createElement('div');
+      submenuWrapper.className = 'context-menu-submenu';
+      const trigger = document.createElement('div');
+      trigger.className = 'context-menu-item';
+      trigger.textContent = item.label + ' →';
+      submenuWrapper.appendChild(trigger);
+
+      const sub = document.createElement('div');
+      sub.className = 'context-menu hidden';
+      for (const subItem of item.submenu) {
+        const subEl = document.createElement('div');
+        subEl.className = 'context-menu-item';
+        if (subItem.colorDot) {
+          const dot = document.createElement('span');
+          dot.className = 'color-swatch';
+          dot.style.background = subItem.colorDot;
+          dot.style.width = '10px';
+          dot.style.height = '10px';
+          subEl.appendChild(dot);
+        }
+        const labelSpan = document.createElement('span');
+        labelSpan.textContent = subItem.label;
+        subEl.appendChild(labelSpan);
+        subEl.addEventListener('click', () => {
+          subItem.action();
+          hideContextMenu();
+        });
+        sub.appendChild(subEl);
+      }
+      submenuWrapper.appendChild(sub);
+      menu.appendChild(submenuWrapper);
+      continue;
+    }
+
+    const el = document.createElement('div');
+    el.className = 'context-menu-item';
+    el.textContent = item.label;
+    el.addEventListener('click', () => {
+      item.action();
+      hideContextMenu();
+    });
+    menu.appendChild(el);
+  }
+
+  document.body.appendChild(menu);
+
+  // Position, keeping within viewport
+  const menuRect = menu.getBoundingClientRect();
+  if (x + menuRect.width > window.innerWidth) x = window.innerWidth - menuRect.width - 4;
+  if (y + menuRect.height > window.innerHeight) y = window.innerHeight - menuRect.height - 4;
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+
+  // Close on click outside
+  const closeHandler = (e) => {
+    if (!menu.contains(e.target)) {
+      hideContextMenu();
+      document.removeEventListener('mousedown', closeHandler, true);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', closeHandler, true), 0);
+}
+
+function showSessionContextMenu(e, sessionId) {
+  if (currentSidebarTab !== 'active') return;
+  const group = getGroupForTab(sessionId);
+  const items = [];
+
+  items.push({
+    label: 'Add to new group',
+    action: () => {
+      if (group) removeTabFromGroupSilent(sessionId);
+      createGroup([sessionId]);
+    },
+  });
+
+  const otherGroups = tabGroups.filter(g => !group || g.id !== group.id);
+  if (otherGroups.length > 0) {
+    items.push({
+      label: 'Move to group',
+      submenu: otherGroups.map(g => ({
+        label: g.name,
+        colorDot: g.color,
+        action: () => addTabToGroup(sessionId, g.id),
+      })),
+    });
+  }
+
+  if (group) {
+    items.push({
+      label: 'Remove from group',
+      action: () => removeTabFromGroup(sessionId),
+    });
+  }
+
+  showContextMenu(e.clientX, e.clientY, items);
+}
+
+function showGroupContextMenu(e, groupId) {
+  const group = tabGroups.find(g => g.id === groupId);
+  if (!group) return;
+
+  const items = [
+    {
+      label: 'Rename group',
+      action: () => {
+        const header = sessionList.querySelector(`.session-group-header[data-group-id="${groupId}"]`);
+        if (!header) return;
+        const nameSpan = header.querySelector('.session-group-name');
+        nameSpan.setAttribute('contenteditable', 'true');
+        nameSpan.focus();
+        const range = document.createRange();
+        range.selectNodeContents(nameSpan);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        const finishRename = () => {
+          nameSpan.setAttribute('contenteditable', 'false');
+          let newName = nameSpan.textContent.trim().substring(0, 50);
+          if (newName) group.name = newName;
+          else nameSpan.textContent = group.name;
+          saveTabState();
+          renderSessionList();
+          nameSpan.removeEventListener('keydown', onKey);
+        };
+        const onKey = (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); finishRename(); }
+          if (ev.key === 'Escape') { nameSpan.textContent = group.name; finishRename(); }
+        };
+        nameSpan.addEventListener('blur', finishRename);
+        nameSpan.addEventListener('keydown', onKey);
+      },
+    },
+    {
+      label: 'Change color',
+      colors: true,
+      currentColor: group.color,
+      onSelect: (color) => {
+        group.color = color;
+        renderSessionList();
+        saveTabState();
+      },
+    },
+    { separator: true },
+    {
+      label: 'Ungroup',
+      action: () => removeGroup(groupId, false),
+    },
+    {
+      label: 'Close group',
+      action: () => removeGroup(groupId, true),
+    },
+  ];
+
+  showContextMenu(e.clientX, e.clientY, items);
+}
+
+function removeTabFromGroupSilent(sessionId) {
+  for (const g of tabGroups) {
+    const idx = g.tabIds.indexOf(sessionId);
+    if (idx !== -1) {
+      g.tabIds.splice(idx, 1);
+      if (g.tabIds.length === 0) {
+        tabGroups = tabGroups.filter(grp => grp.id !== g.id);
+      }
+      break;
+    }
+  }
 }
 
 // Resource panel
@@ -1596,6 +2119,20 @@ function showToast(notification) {
   }, 6000);
 }
 
+// Zoom — refit all terminals after the zoom factor changes
+async function applyZoom(direction) {
+  await window.api.setZoom(direction);
+  // Small delay lets Electron apply the new factor before we refit
+  setTimeout(() => { for (const { fitAddon } of terminals.values()) try { fitAddon.fit(); } catch {} }, 100);
+}
+
+// Ctrl+Scroll zoom
+document.addEventListener('wheel', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  applyZoom(e.deltaY < 0 ? 'in' : 'out');
+}, { passive: false });
+
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
@@ -1605,6 +2142,11 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault(); 
     newSession(); 
   }
+
+  // Zoom: Ctrl/Cmd + '+'/'-'/'0'
+  if (mod && (e.key === '=' || e.key === '+')) { e.preventDefault(); applyZoom('in'); return; }
+  if (mod && e.key === '-') { e.preventDefault(); applyZoom('out'); return; }
+  if (mod && e.key === '0') { e.preventDefault(); applyZoom('reset'); return; }
 
   // Ctrl/Cmd+Tab: Switch between session tabs
   if (e.ctrlKey && e.key === 'Tab') {
@@ -1635,7 +2177,11 @@ document.addEventListener('keydown', (e) => {
   }
 
   if (e.key === 'Escape') {
-    if (!notificationPanel.classList.contains('hidden')) {
+    // Close context menu first if open
+    const ctxMenu = document.getElementById('tab-context-menu');
+    if (ctxMenu) {
+      hideContextMenu();
+    } else if (!notificationPanel.classList.contains('hidden')) {
       notificationPanel.classList.add('hidden');
     } else if (!settingsOverlay.classList.contains('hidden')) {
       closeSettings();
