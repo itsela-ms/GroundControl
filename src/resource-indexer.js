@@ -11,6 +11,8 @@ const WI_URL_RE = /https?:\/\/[^\s"\\)]*\/_workitems\/edit\/(\d+)/g;
 const GIT_URL_RE = /https?:\/\/(?:microsoft\.visualstudio\.com|dev\.azure\.com\/microsoft)\/(?:DefaultCollection\/)?(\w+)\/_git\/([^\s"\\);,]+)/g;
 const WIKI_URL_RE = /https?:\/\/[^\s"\\)]*\/_wiki\/[^\s"\\)]+/g;
 const PR_ID_TOOL_RE = /"pullRequestId"\s*:\s*(\d+)/g;
+const PR_STATUS_RE = /"pullRequestId"\s*:\s*(\d+)[^}]*?"status"\s*:\s*"(active|completed|abandoned)"/gi;
+const PR_STATUS_ESCAPED_RE = /\\?"pullRequestId\\?"\s*:\s*(\d+)[\s\S]{0,200}?\\?"status\\?"\s*:\s*(\d+|\\?"(?:active|completed|abandoned)\\?")/gi;
 const WI_ID_TOOL_RE = /"workItemId"\s*:\s*(\d+)/g;
 
 class ResourceIndexer {
@@ -104,12 +106,19 @@ class ResourceIndexer {
           const prId = m[1];
           const url = m[0].replace(/[)}\]"\\]+$/, ''); // strip trailing junk
           const repoMatch = url.match(/_git\/([^/]+)\/pullrequest/);
-          prs.set(prId, {
-            id: prId,
-            url,
-            repo: repoMatch ? repoMatch[1] : null,
-            type: 'pr'
-          });
+          const existing = prs.get(prId);
+          if (existing) {
+            if (!existing.url) existing.url = url;
+            if (!existing.repo && repoMatch) existing.repo = repoMatch[1];
+          } else {
+            prs.set(prId, {
+              id: prId,
+              url,
+              repo: repoMatch ? repoMatch[1] : null,
+              type: 'pr',
+              state: null
+            });
+          }
         }
 
         // PR IDs from tool calls
@@ -117,7 +126,31 @@ class ResourceIndexer {
         while ((m = prIdRe.exec(line)) !== null) {
           const prId = m[1];
           if (!prs.has(prId)) {
-            prs.set(prId, { id: prId, url: null, repo: null, type: 'pr' });
+            prs.set(prId, { id: prId, url: null, repo: null, type: 'pr', state: null });
+          }
+        }
+
+        // PR status from tool call arguments (e.g. "pullRequestId": 123, ..., "status": "Active")
+        const prStatusRe = new RegExp(PR_STATUS_RE.source, 'gi');
+        while ((m = prStatusRe.exec(line)) !== null) {
+          const prId = m[1];
+          const state = m[2].toLowerCase();
+          const existing = prs.get(prId);
+          if (existing) {
+            existing.state = state;
+          }
+        }
+
+        // PR status from escaped JSON in tool responses (e.g. \"status\":1 or \"status\":\"active\")
+        const prStatusEscRe = new RegExp(PR_STATUS_ESCAPED_RE.source, 'gi');
+        while ((m = prStatusEscRe.exec(line)) !== null) {
+          const prId = m[1];
+          const rawState = m[2].replace(/\\?"/g, '');
+          const STATUS_MAP = { '1': 'active', '2': 'abandoned', '3': 'completed', 'active': 'active', 'abandoned': 'abandoned', 'completed': 'completed' };
+          const state = STATUS_MAP[rawState.toLowerCase()];
+          if (state) {
+            const existing = prs.get(prId);
+            if (existing) existing.state = state;
           }
         }
 

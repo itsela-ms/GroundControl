@@ -1615,6 +1615,17 @@ body {
   font-size: 12px;
 }
 
+.resource-pr-state {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  text-transform: capitalize;
+}
+.resource-pr-active { background: rgba(166, 227, 161, 0.15); color: #a6e3a1; }
+.resource-pr-completed { background: rgba(137, 180, 250, 0.15); color: #89b4fa; }
+.resource-pr-abandoned { background: rgba(243, 139, 168, 0.15); color: #f38ba8; }
+
 /* Resource toggle button in terminal tabs area */
 #btn-toggle-resources {
   background: none;

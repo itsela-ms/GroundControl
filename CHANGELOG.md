@@ -2,6 +2,22 @@
 
 All notable changes to DeepSky are documented here.
 
+## [0.6.1] - 2026-02-25
+
+### Added
+- **PR status tracking** — resource panel and sidebar pills now show active/completed/abandoned state for linked PRs
+- **Ctrl+T** shortcut to create a new session (same as Ctrl+N)
+- **Ctrl+C copy** — when text is selected in the terminal, Ctrl+C copies to clipboard instead of sending SIGINT
+- **Double-click group header** to rename (in addition to the existing context menu option)
+
+### Changed
+- Clipboard operations routed through main process IPC (fixes sandboxed preload restrictions)
+- "Pending" state only triggers for active PRs (completed/abandoned PRs no longer count)
+- Removed `copy` from Electron Edit menu to prevent double-handling with xterm's selection model
+
+### Fixed
+- Removed `Shift+Enter` custom handling that interfered with terminal input
+
 ## [0.6.0] - 2026-02-23
 
 ### Added

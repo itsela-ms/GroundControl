@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, Notification, Menu, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Notification, Menu, dialog, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -140,12 +140,13 @@ app.whenReady().then(async () => {
 
   notificationService.start();
 
-  // Custom menu without 'paste' — xterm's custom key handler owns Ctrl+V / Cmd+V.
-  // The default Electron menu fires webContents.paste() before keydown reaches
-  // the renderer, causing a double-paste.
+  // Custom menu without 'paste' or 'copy' — xterm's custom key handler owns
+  // Ctrl+C / Ctrl+V / Cmd+C / Cmd+V.  The default Electron menu fires
+  // webContents.copy()/paste() before keydown reaches the renderer, which
+  // interferes with xterm's canvas-based selection model.
   const menuTemplate = [];
   menuTemplate.push(
-    { label: 'Edit', submenu: [{ role: 'copy' }, { role: 'selectAll' }] },
+    { label: 'Edit', submenu: [{ role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'toggleDevTools' }, { role: 'reload' }, { role: 'forceReload' }] },
   );
   Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate));
@@ -241,6 +242,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('instructions:write', async (event, content) => {
     await fs.promises.writeFile(INSTRUCTIONS_PATH, content, 'utf8');
   });
+
+  // IPC: Clipboard (main process owns clipboard — not available in sandboxed preloads)
+  ipcMain.handle('clipboard:read', () => clipboard.readText());
+  ipcMain.handle('clipboard:write', (_, text) => clipboard.writeText(text));
 
   // IPC: Open external URL
   ipcMain.handle('shell:openExternal', (event, url) => {

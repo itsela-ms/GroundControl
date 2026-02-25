@@ -5,7 +5,7 @@
  * @param {object} opts
  * @param {boolean} opts.isRunning      - Session has an active terminal
  * @param {boolean} opts.isActive       - Session is the currently focused one
- * @param {boolean} opts.hasPR          - Session has PR resources
+ * @param {boolean} opts.hasPR          - Session has an active PR
  * @param {boolean} opts.isHistory      - Currently viewing the history tab
  * @param {boolean} [opts.isBusy]       - Session produced pty output recently
  * @returns {{ label: string, cls: string }}

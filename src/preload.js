@@ -46,6 +46,10 @@ contextBridge.exposeInMainWorld('api', {
   setZoom: (direction) => ipcRenderer.invoke('zoom:set', direction),
   getZoom: () => ipcRenderer.invoke('zoom:get'),
 
+  // Clipboard (routed through main process — clipboard module isn't available in sandboxed preloads)
+  copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
+  pasteText: () => ipcRenderer.invoke('clipboard:read'),
+
   // App info
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getChangelog: () => ipcRenderer.invoke('app:getChangelog'),

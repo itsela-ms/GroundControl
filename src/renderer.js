@@ -535,7 +535,7 @@ function patchSessionStateBadges() {
     if (!session) return;
 
     const isRunning = sessionAliveState.has(sessionId);
-    const hasPR = session.resources && session.resources.some(r => r.type === 'pr');
+    const hasPR = session.resources && session.resources.some(r => r.type === 'pr' && (!r.state || r.state === 'active'));
     const { label, cls, tip } = deriveSessionState({
       isRunning,
       isActive: sessionId === activeSessionId,
@@ -589,7 +589,7 @@ function createSessionItem(session, group) {
   if (session.resources && session.resources.length > 0) {
     const prs = session.resources.filter(r => r.type === 'pr');
     const wis = session.resources.filter(r => r.type === 'workitem');
-    if (prs.length > 0) allPills.push(`<span class="tag tag-pr" title="${escapeHtml(prs.map(p => 'PR ' + p.id + (p.repo ? ' (' + p.repo + ')' : '')).join('\n'))}">PR ${prs.map(p => p.id).join(', ')}</span>`);
+    if (prs.length > 0) allPills.push(`<span class="tag tag-pr" title="${escapeHtml(prs.map(p => 'PR ' + p.id + (p.repo ? ' (' + p.repo + ')' : '') + (p.state ? ' [' + p.state + ']' : '')).join('\n'))}">PR ${prs.map(p => p.id).join(', ')}</span>`);
     if (wis.length > 0) allPills.push(`<span class="tag tag-wi" title="${escapeHtml(wis.map(w => 'WI ' + w.id).join('\n'))}">WI ${wis.map(w => w.id).join(', ')}</span>`);
   }
   if (session.tags && session.tags.length > 0) {
@@ -612,7 +612,7 @@ function createSessionItem(session, group) {
   }
 
   const isRunning = sessionAliveState.has(session.id);
-  const hasPR = session.resources && session.resources.some(r => r.type === 'pr');
+  const hasPR = session.resources && session.resources.some(r => r.type === 'pr' && (!r.state || r.state === 'active'));
   const { label: stateLabel, cls: stateCls, tip: stateTip } = deriveSessionState({
     isRunning,
     isActive: session.id === activeSessionId,
@@ -753,6 +753,10 @@ function renderSessionList() {
         group.collapsed = !group.collapsed;
         renderSessionList();
         saveTabState();
+      });
+      headerEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        startGroupRename(group);
       });
       headerEl.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -1019,16 +1023,23 @@ function createTerminal(sessionId) {
     // Let zoom shortcuts bubble to the document handler
     if (mod && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0')) return false;
 
+    // Let Ctrl+T and Ctrl+N bubble to document handler for new session
+    if (mod && (e.key === 't' || e.key === 'n')) return false;
+
+    // Ctrl+C with a selection → copy to clipboard instead of sending SIGINT
+    if (mod && e.key === 'c' && terminal.hasSelection()) {
+      e.preventDefault();
+      window.api.copyText(terminal.getSelection());
+      terminal.clearSelection();
+      return false;
+    }
+
     const isPaste = (mod && e.key === 'v') || (e.shiftKey && e.key === 'Insert');
     if (isPaste) {
       e.preventDefault();
-      navigator.clipboard.readText().then(text => {
+      window.api.pasteText().then(text => {
         if (text) window.api.writePty(sessionId, text);
-      }).catch(() => {});
-      return false;
-    }
-    if (e.shiftKey && e.key === 'Enter') {
-      window.api.writePty(sessionId, '\x1b[13;2u');
+      });
       return false;
     }
     return true;
@@ -1473,6 +1484,35 @@ function showSessionContextMenu(e, sessionId) {
   showContextMenu(e.clientX, e.clientY, items);
 }
 
+function startGroupRename(group) {
+  const header = sessionList.querySelector(`.session-group-header[data-group-id="${group.id}"]`);
+  if (!header) return;
+  const nameSpan = header.querySelector('.session-group-name');
+  nameSpan.setAttribute('contenteditable', 'true');
+  nameSpan.focus();
+  const range = document.createRange();
+  range.selectNodeContents(nameSpan);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  const finishRename = () => {
+    nameSpan.setAttribute('contenteditable', 'false');
+    let newName = nameSpan.textContent.trim().substring(0, 50);
+    if (newName) group.name = newName;
+    else nameSpan.textContent = group.name;
+    saveTabState();
+    renderSessionList();
+    nameSpan.removeEventListener('keydown', onKey);
+  };
+  const onKey = (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); finishRename(); }
+    if (ev.key === 'Escape') { nameSpan.textContent = group.name; finishRename(); }
+  };
+  nameSpan.addEventListener('blur', finishRename);
+  nameSpan.addEventListener('keydown', onKey);
+}
+
 function showGroupContextMenu(e, groupId) {
   const group = tabGroups.find(g => g.id === groupId);
   if (!group) return;
@@ -1480,34 +1520,7 @@ function showGroupContextMenu(e, groupId) {
   const items = [
     {
       label: 'Rename group',
-      action: () => {
-        const header = sessionList.querySelector(`.session-group-header[data-group-id="${groupId}"]`);
-        if (!header) return;
-        const nameSpan = header.querySelector('.session-group-name');
-        nameSpan.setAttribute('contenteditable', 'true');
-        nameSpan.focus();
-        const range = document.createRange();
-        range.selectNodeContents(nameSpan);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-
-        const finishRename = () => {
-          nameSpan.setAttribute('contenteditable', 'false');
-          let newName = nameSpan.textContent.trim().substring(0, 50);
-          if (newName) group.name = newName;
-          else nameSpan.textContent = group.name;
-          saveTabState();
-          renderSessionList();
-          nameSpan.removeEventListener('keydown', onKey);
-        };
-        const onKey = (ev) => {
-          if (ev.key === 'Enter') { ev.preventDefault(); finishRename(); }
-          if (ev.key === 'Escape') { nameSpan.textContent = group.name; finishRename(); }
-        };
-        nameSpan.addEventListener('blur', finishRename);
-        nameSpan.addEventListener('keydown', onKey);
-      },
+      action: () => startGroupRename(group),
     },
     {
       label: 'Change color',
@@ -1583,9 +1596,10 @@ function updateResourcePanel(sessionId) {
     for (const pr of prs) {
       const label = pr.repo ? `${pr.repo} #${pr.id}` : `PR #${pr.id}`;
       const url = pr.url || '#';
+      const stateTag = pr.state ? `<span class="resource-pr-state resource-pr-${pr.state}">${pr.state}</span>` : '';
       html += `<a class="resource-link" href="${escapeHtml(url)}" target="_blank" title="${escapeHtml(url)}">
         <span class="resource-icon resource-icon-pr">PR</span>
-        <span class="resource-label"><span class="resource-id">${escapeHtml(pr.id)}</span> ${pr.repo ? escapeHtml(pr.repo) : ''}</span>
+        <span class="resource-label"><span class="resource-id">${escapeHtml(pr.id)}</span> ${pr.repo ? escapeHtml(pr.repo) : ''}${stateTag}</span>
       </a>`;
     }
     html += '</div>';
@@ -2134,8 +2148,8 @@ document.addEventListener('wheel', (e) => {
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
 
-  // Ctrl/Cmd+N: Create new session from anywhere
-  if (mod && e.key === 'n') { 
+  // Ctrl/Cmd+N or Ctrl/Cmd+T: Create new session from anywhere
+  if (mod && (e.key === 'n' || e.key === 't')) { 
     e.preventDefault(); 
     newSession(); 
   }
