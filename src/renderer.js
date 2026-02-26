@@ -15,6 +15,7 @@ let originalInstructions = '';
 let currentInstructions = '';
 let currentTheme = 'mocha';
 const openingSession = new Set();
+const cwdChangingSessions = new Set(); // sessions undergoing cwd change (suppress exit handling)
 const sessionLastUsed = new Map();
 let creatingSession = false;
 const ipcCleanups = []; // unsubscribe fns for IPC listeners
@@ -72,6 +73,10 @@ const emptyState = document.getElementById('empty-state');
 const btnNew = document.getElementById('btn-new');
 const btnNewCenter = document.getElementById('btn-new-center');
 const maxConcurrentInput = document.getElementById('max-concurrent');
+const promptWorkdirInput = document.getElementById('prompt-workdir');
+const defaultWorkdirInput = document.getElementById('default-workdir');
+const btnPickDefaultWorkdir = document.getElementById('btn-pick-default-workdir');
+const btnClearDefaultWorkdir = document.getElementById('btn-clear-default-workdir');
 const instructionsPanel = document.getElementById('instructions-panel');
 const instructionsRendered = document.getElementById('instructions-rendered');
 const btnInstructions = document.getElementById('btn-instructions');
@@ -82,6 +87,9 @@ const btnSettings = document.getElementById('btn-settings');
 const resourcePanel = document.getElementById('resource-panel');
 const resourcePanelContent = document.getElementById('resource-panel-content');
 const btnToggleResources = document.getElementById('btn-toggle-resources');
+const resourceAddInput = document.getElementById('resource-add-input');
+const resourceAddBtn = document.getElementById('resource-add-btn');
+const resourceAddError = document.getElementById('resource-add-error');
 const notificationBadge = document.getElementById('notification-badge');
 const notificationPanel = document.getElementById('notification-panel');
 const notificationListEl = document.getElementById('notification-list');
@@ -101,6 +109,13 @@ syncTitlebarPadding();
 let _titleClickTimeout = null;
 let _titleClickSessionId = null;
 sessionList.addEventListener('click', (e) => {
+  const closeBtn = e.target.closest('.session-close');
+  if (closeBtn) {
+    e.stopPropagation();
+    const item = closeBtn.closest('.session-item');
+    if (item) closeTab(item.dataset.sessionId);
+    return;
+  }
   const deleteBtn = e.target.closest('.session-delete');
   if (deleteBtn) {
     e.stopPropagation();
@@ -109,6 +124,14 @@ sessionList.addEventListener('click', (e) => {
       const session = allSessions.find(s => s.id === item.dataset.sessionId);
       if (session) confirmDeleteSession(session.id, session.title);
     }
+    return;
+  }
+  // Cwd click → pick new directory
+  const cwdEl = e.target.closest('.session-cwd');
+  if (cwdEl) {
+    e.stopPropagation();
+    const sid = cwdEl.dataset.sessionId;
+    if (sid) handleCwdClick(sid);
     return;
   }
   const titleEl = e.target.closest('.session-title');
@@ -141,6 +164,16 @@ sessionList.addEventListener('dblclick', (e) => {
   if (item) startRenameSession(item.dataset.sessionId, titleEl);
 });
 sessionList.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    const cwdEl = e.target.closest('.session-cwd');
+    if (cwdEl) {
+      e.preventDefault();
+      e.stopPropagation();
+      const sid = cwdEl.dataset.sessionId;
+      if (sid) handleCwdClick(sid);
+      return;
+    }
+  }
   if (e.key !== 'Enter') return;
   const item = e.target.closest('.session-item');
   if (item) openSession(item.dataset.sessionId);
@@ -150,6 +183,8 @@ sessionList.addEventListener('keydown', (e) => {
 async function init() {
   const settings = await window.api.getSettings();
   maxConcurrentInput.value = settings.maxConcurrent;
+  promptWorkdirInput.checked = !!settings.promptForWorkdir;
+  defaultWorkdirInput.value = settings.defaultWorkdir || '';
   if (settings.sidebarWidth) {
     document.getElementById('sidebar').style.width = settings.sidebarWidth + 'px';
   }
@@ -177,6 +212,9 @@ async function init() {
   }));
 
   ipcCleanups.push(window.api.onPtyExit((sessionId, exitCode) => {
+    // Skip disposal if session is changing cwd (will be respawned)
+    if (cwdChangingSessions.has(sessionId)) return;
+
     const entry = terminals.get(sessionId);
     if (entry) {
       entry.exited = true;
@@ -206,6 +244,7 @@ async function init() {
     sessionAliveState.delete(sessionId);
     sessionBusyState.delete(sessionId);
     sessionIdleCount.delete(sessionId);
+    cwdChangingSessions.delete(sessionId);
     updateTabStatus(sessionId, false);
     patchSessionStateBadges();
   }));
@@ -214,6 +253,7 @@ async function init() {
     sessionAliveState.delete(sessionId);
     sessionBusyState.delete(sessionId);
     sessionIdleCount.delete(sessionId);
+    cwdChangingSessions.delete(sessionId);
     const entry = terminals.get(sessionId);
     if (entry) {
       if (entry.titlePoll) clearInterval(entry.titlePoll);
@@ -291,6 +331,30 @@ async function init() {
     resourcePanel.classList.add('collapsed');
     btnToggleResources.classList.remove('active');
     fitActiveTerminal();
+  });
+
+  // Add resource
+  async function handleAddResource() {
+    const url = resourceAddInput.value.trim();
+    if (!url) return;
+    if (!activeSessionId) return;
+    resourceAddError.style.display = 'none';
+    const result = await window.api.addResource(activeSessionId, url);
+    if (result && !result.added) {
+      resourceAddError.textContent = result.reason === 'duplicate' ? 'Resource already linked' : 'Could not add resource';
+      resourceAddError.style.display = 'block';
+      setTimeout(() => { resourceAddError.style.display = 'none'; }, 3000);
+      return;
+    }
+    resourceAddInput.value = '';
+    // Refresh the session's resources from main and re-render
+    const sessions = await window.api.listSessions();
+    allSessions = sessions;
+    updateResourcePanel(activeSessionId);
+  }
+  resourceAddBtn.addEventListener('click', handleAddResource);
+  resourceAddInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleAddResource();
   });
 
   // Tab scroll buttons
@@ -621,14 +685,22 @@ function createSessionItem(session, group) {
     isBusy: sessionBusyState.get(session.id) || false
   });
 
+  // Truncate cwd for display — show last folder name or short path
+  let cwdHtml = '';
+  if (session.cwd) {
+    const cwdDisplay = shortenPath(session.cwd);
+    cwdHtml = `<span class="session-cwd" role="button" tabindex="0" data-session-id="${session.id}" title="${escapeHtml(session.cwd)}">📂 ${escapeHtml(cwdDisplay)}</span>`;
+  }
+
   el.innerHTML = `
     <div class="session-header-row">
       <div class="session-title" data-title="${escapeHtml(session.title)}">${escapeHtml(session.title)}</div>
       <span class="session-state ${stateCls}" title="${escapeHtml(stateTip)}">${stateLabel}</span>
     </div>
-    <div class="session-meta"><span>${timeStr}</span></div>
+    <div class="session-meta"><span>${timeStr}</span>${cwdHtml}</div>
     ${tagsHtml}
     ${currentSidebarTab === 'history' ? '<button class="session-delete" title="Delete session">✕</button>' : ''}
+    ${currentSidebarTab === 'active' && isRunning ? '<button class="session-close" tabindex="-1" title="Close session">✕</button>' : ''}
   `;
 
   el.setAttribute('tabindex', '0');
@@ -863,6 +935,43 @@ function startRenameSession(sessionId, titleEl) {
   input.addEventListener('click', (e) => e.stopPropagation());
 }
 
+const cwdPickerActive = new Set();
+
+async function handleCwdClick(sessionId) {
+  if (cwdPickerActive.has(sessionId)) return;
+  cwdPickerActive.add(sessionId);
+
+  try {
+    const session = allSessions.find(s => s.id === sessionId);
+    const defaultPath = session?.cwd || undefined;
+    const picked = await window.api.pickDirectory(defaultPath);
+    if (!picked) return;
+
+    const isAlive = sessionAliveState.has(sessionId);
+    if (isAlive) {
+      const entry = terminals.get(sessionId);
+      if (entry) {
+        entry.terminal.write('\r\n\x1b[90m[Changing working directory…]\x1b[0m\r\n');
+      }
+      cwdChangingSessions.add(sessionId);
+      try {
+        await window.api.changeCwd(sessionId, picked);
+        sessionAliveState.add(sessionId);
+      } finally {
+        cwdChangingSessions.delete(sessionId);
+      }
+    } else {
+      await window.api.changeCwd(sessionId, picked);
+    }
+
+    // Update local state
+    if (session) session.cwd = picked;
+    await refreshSessionList();
+  } finally {
+    cwdPickerActive.delete(sessionId);
+  }
+}
+
 function confirmDeleteSession(sessionId, title) {
   const overlay = document.createElement('div');
   overlay.className = 'confirm-overlay';
@@ -939,7 +1048,18 @@ async function newSession() {
   creatingSession = true;
 
   try {
-    const sessionId = await window.api.newSession();
+    // Prompt for working directory if enabled
+    let cwd = undefined;
+    const settings = await window.api.getSettings();
+    if (settings.promptForWorkdir) {
+      const picked = await window.api.pickDirectory(settings.defaultWorkdir || undefined);
+      if (picked === null) { creatingSession = false; return; } // user cancelled
+      cwd = picked;
+    } else if (settings.defaultWorkdir) {
+      cwd = settings.defaultWorkdir;
+    }
+
+    const sessionId = await window.api.newSession(cwd);
     sessionAliveState.add(sessionId);
     createTerminal(sessionId);
     switchToSession(sessionId);
@@ -947,7 +1067,7 @@ async function newSession() {
 
     // Inject placeholder so the active list renders immediately
     if (!allSessions.find(s => s.id === sessionId)) {
-      allSessions.unshift({ id: sessionId, title: 'New Session', updatedAt: new Date().toISOString(), tags: [], resources: [] });
+      allSessions.unshift({ id: sessionId, title: 'New Session', cwd: cwd || '', updatedAt: new Date().toISOString(), tags: [], resources: [] });
     }
 
     currentSidebarTab = 'active';
@@ -1025,6 +1145,12 @@ function createTerminal(sessionId) {
 
     // Let Ctrl+T and Ctrl+N bubble to document handler for new session
     if (mod && (e.key === 't' || e.key === 'n')) return false;
+
+    // Let Ctrl+Tab / Ctrl+Shift+Tab bubble for tab switching
+    if (e.ctrlKey && e.key === 'Tab') return false;
+
+    // Let Ctrl+W bubble for closing tabs
+    if (mod && e.key === 'w') return false;
 
     // Ctrl+C with a selection → copy to clipboard instead of sending SIGINT
     if (mod && e.key === 'c' && terminal.hasSelection()) {
@@ -1137,8 +1263,7 @@ function addTab(sessionId, title) {
     }
   });
 
-  // Insert before the resource toggle button
-  tabsScrollArea.insertBefore(tab, btnToggleResources);
+  tabsScrollArea.appendChild(tab);
   updateTabScrollButtons();
 }
 
@@ -1174,6 +1299,7 @@ async function closeTab(sessionId) {
   sessionBusyState.delete(sessionId);
   sessionIdleCount.delete(sessionId);
   sessionLastUsed.delete(sessionId);
+  cwdChangingSessions.delete(sessionId);
 
   // Remove from any tab group
   for (const group of tabGroups) {
@@ -1568,6 +1694,22 @@ function toggleResourcePanel() {
   setTimeout(fitActiveTerminal, 250);
 }
 
+function resourceKeyRenderer(r) {
+  if (r.id) return `${r.type}:${r.id}`;
+  const url = (r.url || '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+  return `${r.type}:${url}`;
+}
+
+function renderResourceRow(r, icon, iconClass, label, url, extra) {
+  const key = resourceKeyRenderer(r);
+  const removeBtn = `<button class="resource-remove" data-key="${escapeHtml(key)}" title="Remove">×</button>`;
+  return `<a class="resource-link" href="${escapeHtml(url)}" target="_blank" title="${escapeHtml(url)}" data-key="${escapeHtml(key)}">
+    <span class="resource-icon${iconClass ? ' ' + iconClass : ''}">${escapeHtml(icon)}</span>
+    <span class="resource-label">${label}</span>
+    ${removeBtn}
+  </a>`;
+}
+
 function updateResourcePanel(sessionId) {
   if (resourcePanel.classList.contains('collapsed')) return;
 
@@ -1586,21 +1728,20 @@ function updateResourcePanel(sessionId) {
 
   const prs = resources.filter(r => r.type === 'pr');
   const wis = resources.filter(r => r.type === 'workitem');
+  const pipes = resources.filter(r => r.type === 'pipeline');
+  const rels = resources.filter(r => r.type === 'release');
   const repos = resources.filter(r => r.type === 'repo');
   const wikis = resources.filter(r => r.type === 'wiki');
+  const links = resources.filter(r => r.type === 'link');
 
   let html = '';
 
   if (prs.length > 0) {
     html += '<div class="resource-section"><div class="resource-section-title">Pull Requests</div>';
     for (const pr of prs) {
-      const label = pr.repo ? `${pr.repo} #${pr.id}` : `PR #${pr.id}`;
-      const url = pr.url || '#';
       const stateTag = pr.state ? `<span class="resource-pr-state resource-pr-${pr.state}">${pr.state}</span>` : '';
-      html += `<a class="resource-link" href="${escapeHtml(url)}" target="_blank" title="${escapeHtml(url)}">
-        <span class="resource-icon resource-icon-pr">PR</span>
-        <span class="resource-label"><span class="resource-id">${escapeHtml(pr.id)}</span> ${pr.repo ? escapeHtml(pr.repo) : ''}${stateTag}</span>
-      </a>`;
+      const label = `<span class="resource-id">${escapeHtml(pr.id)}</span> ${pr.repo ? escapeHtml(pr.repo) : ''}${stateTag}`;
+      html += renderResourceRow(pr, 'PR', 'resource-icon-pr', label, pr.url || '#', '');
     }
     html += '</div>';
   }
@@ -1608,11 +1749,27 @@ function updateResourcePanel(sessionId) {
   if (wis.length > 0) {
     html += '<div class="resource-section"><div class="resource-section-title">Work Items</div>';
     for (const wi of wis) {
-      const url = wi.url || '#';
-      html += `<a class="resource-link" href="${escapeHtml(url)}" target="_blank" title="${escapeHtml(url)}">
-        <span class="resource-icon resource-icon-wi">WI</span>
-        <span class="resource-label"><span class="resource-id">${escapeHtml(wi.id)}</span></span>
-      </a>`;
+      const label = `<span class="resource-id">${escapeHtml(wi.id)}</span>`;
+      html += renderResourceRow(wi, 'WI', 'resource-icon-wi', label, wi.url || '#', '');
+    }
+    html += '</div>';
+  }
+
+  if (pipes.length > 0) {
+    html += '<div class="resource-section"><div class="resource-section-title">Pipelines</div>';
+    for (const p of pipes) {
+      const displayId = p.id.startsWith('def-') ? `Def ${p.id.slice(4)}` : `#${p.id}`;
+      const label = `<span class="resource-id">${escapeHtml(displayId)}</span>`;
+      html += renderResourceRow(p, 'Build', 'resource-icon-pipeline', label, p.url || '#', '');
+    }
+    html += '</div>';
+  }
+
+  if (rels.length > 0) {
+    html += '<div class="resource-section"><div class="resource-section-title">Releases</div>';
+    for (const r of rels) {
+      const label = `<span class="resource-id">#${escapeHtml(r.id)}</span>`;
+      html += renderResourceRow(r, 'Rel', 'resource-icon-release', label, r.url || '#', '');
     }
     html += '</div>';
   }
@@ -1620,10 +1777,8 @@ function updateResourcePanel(sessionId) {
   if (repos.length > 0) {
     html += '<div class="resource-section"><div class="resource-section-title">Repositories</div>';
     for (const repo of repos) {
-      html += `<a class="resource-link" href="${escapeHtml(repo.url)}" target="_blank" title="${escapeHtml(repo.url)}">
-        <span class="resource-icon">Repo</span>
-        <span class="resource-label">${escapeHtml(repo.name)}</span>
-      </a>`;
+      const label = escapeHtml(repo.name);
+      html += renderResourceRow(repo, 'Repo', '', label, repo.url, '');
     }
     html += '</div>';
   }
@@ -1634,22 +1789,44 @@ function updateResourcePanel(sessionId) {
       let name;
       try { name = decodeURIComponent(wiki.url.split('/').pop() || wiki.url); }
       catch { name = wiki.url.split('/').pop() || wiki.url; }
-      html += `<a class="resource-link" href="${escapeHtml(wiki.url)}" target="_blank" title="${escapeHtml(wiki.url)}">
-        <span class="resource-icon">Wiki</span>
-        <span class="resource-label">${escapeHtml(name)}</span>
-      </a>`;
+      html += renderResourceRow(wiki, 'Wiki', '', escapeHtml(name), wiki.url, '');
+    }
+    html += '</div>';
+  }
+
+  if (links.length > 0) {
+    html += '<div class="resource-section"><div class="resource-section-title">Links</div>';
+    for (const link of links) {
+      const label = escapeHtml(link.name || link.url);
+      html += renderResourceRow(link, '🔗', 'resource-icon-link', label, link.url, '');
     }
     html += '</div>';
   }
 
   resourcePanelContent.innerHTML = html;
 
-  // Open links in external browser
+  // Open links in external browser (but not when clicking the remove button)
   resourcePanelContent.querySelectorAll('a.resource-link').forEach(a => {
     a.addEventListener('click', (e) => {
+      if (e.target.closest('.resource-remove')) return;
       e.preventDefault();
       const href = a.getAttribute('href');
       if (href && href !== '#') window.api.openExternal(href);
+    });
+  });
+
+  // Remove buttons
+  resourcePanelContent.querySelectorAll('.resource-remove').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = btn.dataset.key;
+      if (!key || !activeSessionId) return;
+      await window.api.removeResource(activeSessionId, key);
+      // Refresh
+      const sessions = await window.api.listSessions();
+      allSessions = sessions;
+      updateResourcePanel(activeSessionId);
     });
   });
 }
@@ -1961,6 +2138,15 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+function shortenPath(p) {
+  if (!p) return '';
+  const sep = p.includes('/') ? '/' : '\\';
+  const parts = p.split(sep).filter(Boolean);
+  if (parts.length <= 2) return p;
+  // Show drive/root + ... + last folder
+  return parts[0] + sep + '…' + sep + parts[parts.length - 1];
+}
+
 
 // Sidebar resize
 const resizeHandle = document.getElementById('resize-handle');
@@ -2019,6 +2205,24 @@ btnNewCenter.addEventListener('click', newSession);
 maxConcurrentInput.addEventListener('change', (e) => {
   const val = parseInt(e.target.value, 10);
   if (val >= 1 && val <= 20) window.api.updateSettings({ maxConcurrent: val });
+});
+
+promptWorkdirInput.addEventListener('change', (e) => {
+  window.api.updateSettings({ promptForWorkdir: e.target.checked });
+});
+
+btnPickDefaultWorkdir.addEventListener('click', async () => {
+  const current = defaultWorkdirInput.value || undefined;
+  const picked = await window.api.pickDirectory(current);
+  if (picked) {
+    defaultWorkdirInput.value = picked;
+    window.api.updateSettings({ defaultWorkdir: picked });
+  }
+});
+
+btnClearDefaultWorkdir.addEventListener('click', () => {
+  defaultWorkdirInput.value = '';
+  window.api.updateSettings({ defaultWorkdir: '' });
 });
 
 // Notification functions
