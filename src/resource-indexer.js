@@ -10,10 +10,34 @@ const PR_URL_RE = /https?:\/\/[^\s"\\)]*\/pullrequest\/(\d+)/g;
 const WI_URL_RE = /https?:\/\/[^\s"\\)]*\/_workitems\/edit\/(\d+)/g;
 const GIT_URL_RE = /https?:\/\/(?:microsoft\.visualstudio\.com|dev\.azure\.com\/microsoft)\/(?:DefaultCollection\/)?(\w+)\/_git\/([^\s"\\);,]+)/g;
 const WIKI_URL_RE = /https?:\/\/[^\s"\\)]*\/_wiki\/[^\s"\\)]+/g;
+const PIPELINE_URL_RE = /https?:\/\/[^\s"\\)]*\/_build\/results\?buildId=(\d+)[^\s"\\)]*/g;
+const PIPELINE_DEF_URL_RE = /https?:\/\/[^\s"\\)]*\/_build\?definitionId=(\d+)[^\s"\\)]*/g;
+const RELEASE_URL_RE = /https?:\/\/[^\s"\\)]*\/_releaseProgress\?[^\s"\\)]*releaseId=(\d+)[^\s"\\)]*/g;
 const PR_ID_TOOL_RE = /"pullRequestId"\s*:\s*(\d+)/g;
 const PR_STATUS_RE = /"pullRequestId"\s*:\s*(\d+)[^}]*?"status"\s*:\s*"(active|completed|abandoned)"/gi;
 const PR_STATUS_ESCAPED_RE = /\\?"pullRequestId\\?"\s*:\s*(\d+)[\s\S]{0,200}?\\?"status\\?"\s*:\s*(\d+|\\?"(?:active|completed|abandoned)\\?")/gi;
 const WI_ID_TOOL_RE = /"workItemId"\s*:\s*(\d+)/g;
+
+function normalizeRepoUrl(url) {
+  url = (url || '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+  // Canonicalize host variants to a consistent form
+  url = url.replace(/microsoft\.visualstudio\.com/, 'dev.azure.com/microsoft');
+  url = url.replace(/\/DefaultCollection\//, '/');
+  // Strip path segments after /_git/RepoName
+  const gitIdx = url.indexOf('/_git/');
+  if (gitIdx !== -1) {
+    const afterGit = url.substring(gitIdx + 6);
+    const repoName = afterGit.split('/')[0];
+    url = url.substring(0, gitIdx + 6) + repoName;
+  }
+  return url;
+}
+
+function resourceKey(r) {
+  if (r.id) return `${r.type}:${r.id}`;
+  const url = r.type === 'repo' ? normalizeRepoUrl(r.url) : (r.url || '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+  return `${r.type}:${url}`;
+}
 
 class ResourceIndexer {
   constructor(sessionStateDir) {
@@ -91,6 +115,8 @@ class ResourceIndexer {
     const workItems = new Map(); // wiId -> { id, url? }
     const repos = new Set();     // repo URLs
     const wikiUrls = new Set();
+    const pipelines = new Map(); // buildId -> { id, url }
+    const releases = new Map();  // releaseId -> { id, url }
 
     return new Promise((resolve) => {
       const stream = fs.createReadStream(eventsPath, { encoding: 'utf8' });
@@ -176,6 +202,13 @@ class ResourceIndexer {
         while ((m = gitUrlRe.exec(line)) !== null) {
           let repoUrl = m[0].replace(/[)}\]"\\;,]+$/, '');
           if (!repoUrl.includes('/pullrequest/')) {
+            // Normalize: keep only up to /_git/RepoName
+            const gitIdx = repoUrl.indexOf('/_git/');
+            if (gitIdx !== -1) {
+              const afterGit = repoUrl.substring(gitIdx + 6);
+              const repoName = afterGit.split('/')[0];
+              repoUrl = repoUrl.substring(0, gitIdx + 6) + repoName;
+            }
             repos.add(repoUrl);
           }
         }
@@ -184,6 +217,31 @@ class ResourceIndexer {
         const wikiRe = new RegExp(WIKI_URL_RE.source, 'g');
         while ((m = wikiRe.exec(line)) !== null) {
           wikiUrls.add(m[0].replace(/[)}\]"\\]+$/, ''));
+        }
+
+        // Pipeline URLs (build results)
+        const pipelineRe = new RegExp(PIPELINE_URL_RE.source, 'g');
+        while ((m = pipelineRe.exec(line)) !== null) {
+          const buildId = m[1];
+          if (!pipelines.has(buildId)) {
+            pipelines.set(buildId, { id: buildId, url: m[0].replace(/[)}\]"\\]+$/, ''), type: 'pipeline' });
+          }
+        }
+        const pipelineDefRe = new RegExp(PIPELINE_DEF_URL_RE.source, 'g');
+        while ((m = pipelineDefRe.exec(line)) !== null) {
+          const defId = `def-${m[1]}`;
+          if (!pipelines.has(defId)) {
+            pipelines.set(defId, { id: defId, url: m[0].replace(/[)}\]"\\]+$/, ''), type: 'pipeline' });
+          }
+        }
+
+        // Release URLs
+        const releaseRe = new RegExp(RELEASE_URL_RE.source, 'g');
+        while ((m = releaseRe.exec(line)) !== null) {
+          const releaseId = m[1];
+          if (!releases.has(releaseId)) {
+            releases.set(releaseId, { id: releaseId, url: m[0].replace(/[)}\]"\\]+$/, ''), type: 'release' });
+          }
         }
       });
 
@@ -195,7 +253,9 @@ class ResourceIndexer {
             const repoName = url.match(/_git\/(.+)/)?.[1] || url;
             return { type: 'repo', name: repoName, url };
           }),
-          ...[...wikiUrls].map(url => ({ type: 'wiki', url }))
+          ...[...wikiUrls].map(url => ({ type: 'wiki', url })),
+          ...[...pipelines.values()],
+          ...[...releases.values()]
         ];
         resolve(resources);
       });
@@ -205,7 +265,56 @@ class ResourceIndexer {
   }
 
   getResourcesForSession(sessionId) {
-    return this.cache[sessionId]?.resources || [];
+    const entry = this.cache[sessionId];
+    if (!entry) return [];
+    const auto = entry.resources || [];
+    const manual = entry.manualResources || [];
+    const removed = new Set(entry.removedKeys || []);
+    const seen = new Set();
+    const merged = [];
+    for (const r of [...auto, ...manual]) {
+      const key = resourceKey(r);
+      if (removed.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(r);
+    }
+    return merged;
+  }
+
+  async addManualResource(sessionId, resource) {
+    if (!this.cache[sessionId]) {
+      this.cache[sessionId] = { resources: [], indexedAt: 0 };
+    }
+    const entry = this.cache[sessionId];
+    if (!entry.manualResources) entry.manualResources = [];
+    if (!entry.removedKeys) entry.removedKeys = [];
+
+    const key = resourceKey(resource);
+    // Check for duplicates across auto + manual
+    const allKeys = new Set([
+      ...(entry.resources || []).map(resourceKey),
+      ...entry.manualResources.map(resourceKey)
+    ]);
+    if (allKeys.has(key)) return { added: false, reason: 'duplicate' };
+
+    // Un-remove if it was previously removed
+    entry.removedKeys = entry.removedKeys.filter(k => k !== key);
+
+    entry.manualResources.push(resource);
+    await this._saveCache();
+    return { added: true };
+  }
+
+  async removeResource(sessionId, key) {
+    const entry = this.cache[sessionId];
+    if (!entry) return;
+    if (!entry.removedKeys) entry.removedKeys = [];
+    if (!entry.removedKeys.includes(key)) entry.removedKeys.push(key);
+    // Also remove from manual if it was manually added
+    if (entry.manualResources) {
+      entry.manualResources = entry.manualResources.filter(r => resourceKey(r) !== key);
+    }
+    await this._saveCache();
   }
 
   search(query) {
@@ -226,3 +335,35 @@ class ResourceIndexer {
 }
 
 module.exports = ResourceIndexer;
+module.exports.resourceKey = resourceKey;
+
+module.exports.parseUrlToResource = function parseUrlToResource(url) {
+  url = url.trim();
+  let m;
+  if ((m = url.match(/\/pullrequest\/(\d+)/))) {
+    const repoMatch = url.match(/_git\/([^/]+)\/pullrequest/);
+    return { type: 'pr', id: m[1], url, repo: repoMatch ? repoMatch[1] : null, state: null };
+  }
+  if ((m = url.match(/\/_workitems\/edit\/(\d+)/))) {
+    return { type: 'workitem', id: m[1], url };
+  }
+  if ((m = url.match(/\/_build\/results\?buildId=(\d+)/))) {
+    return { type: 'pipeline', id: m[1], url };
+  }
+  if ((m = url.match(/\/_build\?definitionId=(\d+)/))) {
+    return { type: 'pipeline', id: `def-${m[1]}`, url };
+  }
+  if ((m = url.match(/releaseId=(\d+)/))) {
+    return { type: 'release', id: m[1], url };
+  }
+  if (url.match(/_wiki\//)) {
+    return { type: 'wiki', url };
+  }
+  if (url.match(/_git\//)) {
+    url = normalizeRepoUrl(url);
+    const repoName = url.match(/_git\/(.+)/)?.[1] || url;
+    return { type: 'repo', name: repoName, url };
+  }
+  // Generic link
+  return { type: 'link', url, name: url.replace(/^https?:\/\//, '').split('/').slice(0, 3).join('/') };
+};

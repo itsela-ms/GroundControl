@@ -303,6 +303,35 @@ body {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
+.session-item.running:hover::after {
+  display: none;
+}
+
+.session-close {
+  position: absolute;
+  top: 10px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--subtext0);
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease, color 0.15s ease;
+  padding: 4px;
+  line-height: 1;
+  z-index: 1;
+}
+
+.session-item.running:hover .session-close {
+  opacity: 0.7;
+}
+
+.session-close:hover {
+  opacity: 1 !important;
+  color: color-mix(in srgb, var(--red) 120%, white);
+}
+
 .session-item.running::after {
   content: '';
   position: absolute;
@@ -411,9 +440,25 @@ body {
 
 .session-meta {
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text);
+  opacity: 0.7;
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.session-cwd {
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+  transition: opacity 0.15s;
+}
+
+.session-cwd:hover {
+  opacity: 1;
+  text-decoration: underline;
 }
 
 .session-tags {
@@ -1076,6 +1121,45 @@ body {
   border-color: var(--accent);
 }
 
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.toggle-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.settings-input-row input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-input-row input[type="text"][readonly] {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.settings-input-row input[type="text"]::placeholder {
+  color: var(--text-dimmer);
+}
+
 .theme-switcher {
   display: flex;
   gap: 8px;
@@ -1626,6 +1710,90 @@ body {
 .resource-pr-completed { background: rgba(137, 180, 250, 0.15); color: #89b4fa; }
 .resource-pr-abandoned { background: rgba(243, 139, 168, 0.15); color: #f38ba8; }
 
+.resource-icon-pipeline { background: rgba(250, 179, 135, 0.2); color: #fab387; }
+.resource-icon-release { background: rgba(203, 166, 247, 0.2); color: #cba6f7; }
+.resource-icon-link { background: rgba(148, 226, 213, 0.2); color: #94e2d5; }
+
+/* Remove button on resource rows */
+.resource-link {
+  position: relative;
+}
+
+.resource-remove {
+  display: none;
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-dimmer);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  border-radius: 3px;
+  transition: color 0.1s, background 0.1s;
+}
+.resource-remove:hover {
+  color: #f38ba8;
+  background: rgba(243, 139, 168, 0.15);
+}
+.resource-link:hover .resource-remove {
+  display: block;
+}
+
+/* Add resource input area */
+.resource-add-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.resource-add-row input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 4px 8px;
+  outline: none;
+  font-family: inherit;
+}
+.resource-add-row input:focus {
+  border-color: var(--accent);
+}
+.resource-add-row input::placeholder {
+  color: var(--text-dimmer);
+}
+
+.resource-add-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 14px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.1s, color 0.1s;
+}
+.resource-add-btn:hover {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.resource-add-error {
+  padding: 2px 12px;
+  font-size: 10px;
+  color: #f38ba8;
+}
+
 /* Resource toggle button in terminal tabs area */
 #btn-toggle-resources {
   background: none;
@@ -1635,7 +1803,7 @@ body {
   padding: 4px 8px;
   border-radius: 4px;
   cursor: pointer;
-  margin-left: auto;
+  margin-left: 4px;
   margin-right: 8px;
   align-self: center;
   flex-shrink: 0;

@@ -51,9 +51,9 @@
         <div id="terminal-tabs">
           <button class="tab-scroll-btn tab-scroll-left" title="Scroll left">◀</button>
           <div class="tabs-scroll-area">
-            <button id="btn-toggle-resources" title="Links">🔗</button>
           </div>
           <button class="tab-scroll-btn tab-scroll-right" title="Scroll right">▶</button>
+          <button id="btn-toggle-resources" title="Links">🔗</button>
         </div>
         <div id="terminal-main-row">
           <div id="terminal-container">
@@ -70,6 +70,11 @@
               <h3>Session Resources</h3>
               <button class="resource-panel-close" title="Close">×</button>
             </div>
+            <div class="resource-add-row">
+              <input type="text" id="resource-add-input" placeholder="Paste a link to add…" />
+              <button class="resource-add-btn" id="resource-add-btn" title="Add resource">+</button>
+            </div>
+            <div id="resource-add-error" class="resource-add-error" style="display:none"></div>
             <div id="resource-panel-content">
               <div class="resource-empty">Open a session to see its resources</div>
             </div>
@@ -107,6 +112,22 @@
           <p class="settings-description">Number of sessions to keep alive in the background. Older sessions are closed when the limit is reached.</p>
           <div class="settings-input-row">
             <input type="number" id="max-concurrent" min="1" max="20" value="5">
+          </div>
+        </div>
+        <div class="settings-group">
+          <label class="settings-label">Working Directory</label>
+          <p class="settings-description">Prompt for a working directory when creating a new session.</p>
+          <div class="settings-input-row">
+            <label class="toggle-label">
+              <input type="checkbox" id="prompt-workdir">
+              <span>Ask on new session</span>
+            </label>
+          </div>
+          <p class="settings-description" style="margin-top: 10px;">Default directory for new sessions (used when prompt is off, or as the starting path in the picker).</p>
+          <div class="settings-input-row">
+            <input type="text" id="default-workdir" placeholder="User home" readonly>
+            <button id="btn-pick-default-workdir" class="btn-secondary">Browse…</button>
+            <button id="btn-clear-default-workdir" class="btn-secondary" title="Reset to user home">✕</button>
           </div>
         </div>
         <div class="settings-group">

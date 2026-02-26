@@ -12,6 +12,8 @@ const DEFAULTS = {
   tabGroups: [], // Array of { id, name, color, collapsed, tabIds }
   sessionOrder: [], // Manual ordering of active session IDs in sidebar
   zoomFactor: 1.0, // 0.75 – 1.5
+  promptForWorkdir: false, // show directory picker when creating a new session
+  defaultWorkdir: '', // default working directory for new sessions; empty = user home
 };
 
 class SettingsService {

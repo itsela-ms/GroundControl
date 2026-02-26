@@ -6,6 +6,7 @@ const SessionService = require('./session-service');
 const PtyManager = require('./pty-manager');
 const TagIndexer = require('./tag-indexer');
 const ResourceIndexer = require('./resource-indexer');
+const { parseUrlToResource } = require('./resource-indexer');
 const SettingsService = require('./settings-service');
 const NotificationService = require('./notification-service');
 const UpdateService = require('./update-service');
@@ -159,13 +160,57 @@ app.whenReady().then(async () => {
   });
 
   // IPC: Open/resume a session
-  ipcMain.handle('session:open', (event, sessionId) => {
-    return ptyManager.openSession(sessionId);
+  ipcMain.handle('session:open', async (event, sessionId) => {
+    const cwd = await sessionService.getCwd(sessionId);
+    return ptyManager.openSession(sessionId, cwd || undefined);
   });
 
   // IPC: Start a new session
-  ipcMain.handle('session:new', () => {
-    return ptyManager.newSession();
+  ipcMain.handle('session:new', async (event, cwd) => {
+    // Try pre-warmed standby for instant startup
+    const claimed = ptyManager.claimStandby(cwd || undefined);
+    if (claimed) {
+      if (cwd) await sessionService.saveCwd(claimed.id, cwd);
+      // Flush buffered startup output to renderer
+      if (claimed.bufferedData.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('pty:data', {
+          sessionId: claimed.id,
+          data: claimed.bufferedData.join('')
+        });
+      }
+      scheduleWarmUp();
+      return claimed.id;
+    }
+
+    // Cold start fallback
+    const sessionId = ptyManager.newSession(cwd || undefined);
+    if (cwd) {
+      await sessionService.saveCwd(sessionId, cwd);
+    }
+    scheduleWarmUp();
+    return sessionId;
+  });
+
+  // IPC: Pick a directory (native OS dialog)
+  ipcMain.handle('dialog:pickDirectory', async (event, defaultPath) => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose working directory',
+      defaultPath: defaultPath || os.homedir(),
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || !result.filePaths.length) return null;
+    return result.filePaths[0];
+  });
+
+  // IPC: Change working directory of a session (save + kill + respawn)
+  const cwdChangingSessions = new Set();
+  ipcMain.handle('session:changeCwd', async (event, sessionId, cwd) => {
+    await sessionService.saveCwd(sessionId, cwd);
+    cwdChangingSessions.add(sessionId);
+    ptyManager.kill(sessionId);
+    const result = ptyManager.openSession(sessionId, cwd);
+    cwdChangingSessions.delete(sessionId);
+    return result;
   });
 
   // IPC: Write to a session's pty
@@ -272,6 +317,9 @@ app.whenReady().then(async () => {
 
   // Auto-notify on session exit
   ptyManager.on('exit', (sessionId, exitCode) => {
+    // Suppress exit handling during cwd change (session will be respawned)
+    if (cwdChangingSessions.has(sessionId)) return;
+
     // Flush any remaining buffered data before signalling exit
     if (ptyDataBuffers.has(sessionId) && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('pty:data', { sessionId, data: ptyDataBuffers.get(sessionId).join('') });
@@ -318,6 +366,15 @@ app.whenReady().then(async () => {
     await sessionService.deleteSession(sessionId);
   });
 
+  ipcMain.handle('resource:add', async (event, sessionId, url) => {
+    const resource = parseUrlToResource(url);
+    return resourceIndexer.addManualResource(sessionId, resource);
+  });
+
+  ipcMain.handle('resource:remove', async (event, sessionId, key) => {
+    await resourceIndexer.removeResource(sessionId, key);
+  });
+
   // Forward pty output to renderer — batch at 16ms intervals to prevent IPC flooding
   const ptyDataBuffers = new Map(); // sessionId -> string[]
 
@@ -340,59 +397,24 @@ app.whenReady().then(async () => {
       ptyFlushTimer = setTimeout(flushPtyData, 16);
     }
   });
+
+  // Pre-warm a standby session for instant new-session creation
+  function scheduleWarmUp() {
+    setTimeout(() => {
+      const settings = settingsService.get();
+      if (settings.promptForWorkdir) return;
+      const cwd = settings.defaultWorkdir || undefined;
+      ptyManager.warmUp(cwd);
+    }, 3000);
+  }
+  scheduleWarmUp();
 });
 
-const GRACEFUL_POLL_MS = 3000;
-const GRACEFUL_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
-const BUSY_THRESHOLD_MS = 5000;
-
-app.on('window-all-closed', async () => {
+app.on('window-all-closed', () => {
   tagIndexer.stop();
   resourceIndexer.stop();
   notificationService.stop();
   if (ptyFlushTimer) { clearTimeout(ptyFlushTimer); ptyFlushTimer = null; }
-
-  // Kill sessions that are idle(not producing output)
-  ptyManager.killIdle(BUSY_THRESHOLD_MS);
-
-  const busy = ptyManager.getBusySessions(BUSY_THRESHOLD_MS);
-  if (busy.length === 0) {
-    ptyManager.killAll();
-    app.quit();
-    return;
-  }
-
-  // Busy sessions detected — ask user what to do
-  const sessionWord = busy.length === 1 ? 'session is' : 'sessions are';
-  const { response } = await dialog.showMessageBox({
-    type: 'question',
-    buttons: ['Let them finish (up to 10 min)', 'Kill all and quit'],
-    defaultId: 0,
-    cancelId: 1,
-    title: 'Sessions still working',
-    message: `${busy.length} ${sessionWord} still processing.`,
-    detail: 'AI is actively running. You can let it finish in the background or kill everything now.'
-  });
-
-  if (response === 1) {
-    ptyManager.killAll();
-    app.quit();
-    return;
-  }
-
-  // Graceful shutdown — poll until all sessions go quiet or timeout
-  const startedAt = Date.now();
-  const pollTimer = setInterval(() => {
-    // Kill any sessions that have gone quiet since last poll
-    ptyManager.killIdle(BUSY_THRESHOLD_MS);
-
-    const remaining = ptyManager.getBusySessions(BUSY_THRESHOLD_MS);
-    const timedOut = (Date.now() - startedAt) >= GRACEFUL_TIMEOUT_MS;
-
-    if (remaining.length === 0 || timedOut) {
-      clearInterval(pollTimer);
-      ptyManager.killAll();
-      app.quit();
-    }
-  }, GRACEFUL_POLL_MS);
+  ptyManager.killAll();
+  app.quit();
 });

@@ -2,6 +2,30 @@
 
 All notable changes to DeepSky are documented here.
 
+## [0.7.0] - 2026-02-26
+
+### Added
+- **Working directory support** — choose a working directory per session
+  - Optional directory picker on new session creation (enable in Settings)
+  - Click the cwd path in the sidebar to change a running session's directory
+  - Sessions respawn in the new directory; persisted across restarts via `.deepsky-cwd`
+  - Default working directory setting in Settings panel
+- **Session close button** — `✕` button on active session tabs for quick close (kills the PTY)
+- **Resource panel: manual add** — paste any ADO link into the input to pin it to the session
+- **Resource panel: remove button** — `×` hover button on each resource row to dismiss it
+- **Resource panel: pipeline & release links** — auto-extracted from session events + manually addable
+  - Build results (`_build/results?buildId=`), pipeline definitions (`_build?definitionId=`), releases (`_releaseProgress?releaseId=`)
+- **Resource panel: generic links** — any non-ADO URL can be added as a generic link
+- **Resource deduplication** — resources keyed by `{type}:{id|url}`; duplicates rejected on add and filtered on display
+
+### Changed
+- PTY session entry uses direct reference to prevent stale exit handlers after kill+respawn
+- PTY spawn falls back to homedir if the specified cwd is invalid
+- Resource panel 🔗 toggle button pinned outside the scrollable tab area (no longer disappears on tab overflow)
+
+### Fixed
+- Race condition where old PTY exit handler could delete a newly-opened session entry during cwd change
+
 ## [0.6.1] - 2026-02-25
 
 ### Added

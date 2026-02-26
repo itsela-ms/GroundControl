@@ -400,9 +400,7 @@ async function init() {
   if (settings.openTabs && settings.openTabs.length > 0) {
     const validIds = new Set(allSessions.map(s => s.id));
     const tabsToRestore = settings.openTabs.filter(id => validIds.has(id));
-    for (const sessionId of tabsToRestore) {
-      try { await openSession(sessionId); } catch {}
-    }
+    await Promise.allSettled(tabsToRestore.map(id => openSession(id)));
 
     // Restore tab groups (with validation)
     if (Array.isArray(settings.tabGroups) && settings.tabGroups.length > 0) {
@@ -1694,9 +1692,22 @@ function toggleResourcePanel() {
   setTimeout(fitActiveTerminal, 250);
 }
 
+function normalizeRepoUrl(url) {
+  url = (url || '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+  url = url.replace(/microsoft\.visualstudio\.com/, 'dev.azure.com/microsoft');
+  url = url.replace(/\/DefaultCollection\//, '/');
+  const gitIdx = url.indexOf('/_git/');
+  if (gitIdx !== -1) {
+    const afterGit = url.substring(gitIdx + 6);
+    const repoName = afterGit.split('/')[0];
+    url = url.substring(0, gitIdx + 6) + repoName;
+  }
+  return url;
+}
+
 function resourceKeyRenderer(r) {
   if (r.id) return `${r.type}:${r.id}`;
-  const url = (r.url || '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+  const url = r.type === 'repo' ? normalizeRepoUrl(r.url) : (r.url || '').replace(/[?#].*$/, '').replace(/\/+$/, '');
   return `${r.type}:${url}`;
 }
 
@@ -2373,14 +2384,13 @@ document.addEventListener('keydown', (e) => {
     switchToSession(tabs[next].dataset.sessionId);
   }
 
-  // Ctrl/Cmd+W: Close current session tab (only when terminal is focused)
+  // Ctrl/Cmd+W: Close current session tab
   if (mod && e.key === 'w') {
     e.preventDefault();
-    // Only allow closing when a terminal is focused (not when in search or other inputs)
-    if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
-    // Check if we're focused on a terminal
-    const focusedTerminal = activeSessionId && terminals.has(activeSessionId);
-    if (focusedTerminal) closeTab(activeSessionId);
+    const ae = document.activeElement;
+    const isXterm = ae?.classList.contains('xterm-helper-textarea');
+    if (!isXterm && (ae?.tagName === 'INPUT' || ae?.tagName === 'TEXTAREA')) return;
+    if (activeSessionId) closeTab(activeSessionId);
   }
 
   // Ctrl/Cmd+F: Focus search bar
