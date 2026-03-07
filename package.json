@@ -37,7 +37,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "itsela_microsoft",
+      "owner": "itsela-ms",
       "repo": "DeepSky"
     },
     "forceCodeSigning": false
