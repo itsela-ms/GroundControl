@@ -1646,7 +1646,13 @@ function toggleStatusPanel() {
   const collapsed = statusPanel.classList.toggle('collapsed');
   btnToggleStatus.classList.toggle('active', !collapsed);
   if (!collapsed && activeSessionId) updateStatusPanel(activeSessionId);
-  setTimeout(fitActiveTerminal, 250);
+  // Refit terminal once the CSS width transition actually finishes
+  statusPanel.addEventListener('transitionend', function onEnd(e) {
+    if (e.propertyName === 'width') {
+      statusPanel.removeEventListener('transitionend', onEnd);
+      fitActiveTerminal();
+    }
+  });
 }
 
 // Section expand/collapse state
@@ -1859,8 +1865,13 @@ function fitActiveTerminal() {
     entry.fitAddon.fit();
     window.api.resizePty(activeSessionId, entry.terminal.cols, entry.terminal.rows);
     // Force viewport scroll area sync even when fit() is a no-op (same cols/rows).
-    // Fixes scroll range going stale on sub-row container resizes.
     entry.terminal._core?.viewport?.syncScrollArea(true);
+    // Reset any horizontal scroll offset that xterm's viewport may have retained
+    // from a wider column count (e.g. when status panel opens and narrows the container).
+    const viewport = entry.terminal.element?.querySelector('.xterm-viewport');
+    if (viewport) viewport.scrollLeft = 0;
+    const screen = entry.terminal.element?.querySelector('.xterm-screen');
+    if (screen) screen.style.width = '';
   }
 }
 

@@ -2,6 +2,11 @@
 
 All notable changes to DeepSky are documented here.
 
+## [0.8.4] - 2026-03-12
+
+### Fixed
+- **Terminal horizontal scroll** — fixed terminal content getting cut off on the left when the status panel is open, caused by stale xterm viewport scroll offset after container resize
+
 ## [0.8.3] - 2026-03-12
 
 ### Changed
